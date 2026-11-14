@@ -817,6 +817,8 @@ export type SessionEntryCreationPhase =
   | "publication";
 
 export type SessionEntryCreateWithTranscriptOptions = {
+  /** Require a durable worker and a physically unused session key and transcript ID. */
+  requireAbsent?: boolean;
   /** Explicit label claim, checked again inside the final write transaction. */
   label?: string;
   onPhase?: (phase: SessionEntryCreationPhase) => void;

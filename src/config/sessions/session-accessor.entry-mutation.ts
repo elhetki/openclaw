@@ -372,9 +372,11 @@ export async function createSessionEntryWithTranscript<TError = string>(
     | SessionEntryCreateWithTranscriptPrepareResult<TError>,
   options: SessionEntryCreateWithTranscriptOptions = {},
 ): Promise<SessionEntryCreateWithTranscriptResult<TError>> {
-  const memory = await createSessionActorEntryWithTranscriptInScope(scope, createEntry, options);
-  if (memory) {
-    return memory;
+  if (!options.requireAbsent) {
+    const memory = await createSessionActorEntryWithTranscriptInScope(scope, createEntry, options);
+    if (memory) {
+      return memory;
+    }
   }
   const captured = {
     ...scope,

@@ -2,6 +2,7 @@ import { isMainThread } from "node:worker_threads";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { hasSqliteWorkerOutcomeUnknown } from "../../infra/sqlite-worker-contract.js";
 import { assertExistingDatabaseIdentity } from "../../infra/sqlite-worker-identity.js";
+import { isIncognitoSessionKey } from "../../routing/session-key.js";
 import {
   openOpenClawAgentDatabase,
   runOpenClawAgentWriteTransaction,
@@ -59,16 +60,21 @@ export async function createSessionEntryWithTranscriptInScope<TError>(
     | SessionEntryCreateWithTranscriptPrepareResult<TError>,
   options: SessionEntryCreateWithTranscriptOptions,
 ): Promise<SessionEntryCreateWithTranscriptResult<TError>> {
-  const memory = await createSessionActorEntryWithTranscriptInScope(
-    { ...scope, storePath: scope.path },
-    createEntry,
-    options,
-  );
-  if (memory) {
-    return memory;
+  if (!options.requireAbsent) {
+    const memory = await createSessionActorEntryWithTranscriptInScope(
+      { ...scope, storePath: scope.path },
+      createEntry,
+      options,
+    );
+    if (memory) {
+      return memory;
+    }
   }
   const databaseOptions = { ...toDatabaseOptions(scope), path: scope.path };
   const useWorker = isMainThread && supportsOpenClawAgentDatabaseExecution(databaseOptions);
+  if (options.requireAbsent && (!useWorker || isIncognitoSessionKey(scope.sessionKey))) {
+    throw new Error("Session creation with an absent target requires a durable agent worker");
+  }
   const retained = useWorker ? retainSessionHistoryWorkerDatabase(databaseOptions) : undefined;
   try {
     let source: CreationSource;
@@ -124,6 +130,9 @@ export async function createSessionEntryWithTranscriptInScope<TError>(
       };
     }
     const { normalizedKey, legacyKeys, existingEntry, targetEntry, labelInUse } = source.snapshot;
+    if (options.requireAbsent && (existingEntry || targetEntry || legacyKeys.length > 0)) {
+      throw new Error("Session creation requires an absent target");
+    }
     return await withSessionEntryCreationPublication<
       SessionEntryCreateWithTranscriptResult<TError>
     >(
@@ -278,6 +287,9 @@ export async function createSessionEntryWithTranscriptInScope<TError>(
             },
             previousSessionKeys: legacyKeys,
             entry: created.entry,
+            absentCreationTarget: options.requireAbsent
+              ? { sessionKey: normalizedKey, sessionId: created.entry.sessionId }
+              : undefined,
             assertCommitAllowed: assertCurrent,
             withCommit,
             ownerAssignment: owner ? { sessionKey: normalizedKey, owner } : undefined,

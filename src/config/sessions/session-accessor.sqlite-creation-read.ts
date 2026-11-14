@@ -1,6 +1,12 @@
+import {
+  executeSqliteQueryTakeFirstSync,
+  getNodeSqliteKysely,
+  sqliteStringSet,
+} from "../../infra/kysely-sync.js";
 import { sqlPublicationAnchor } from "../../infra/sql-connection.js";
 import { withSqlitePostCommitPublications } from "../../infra/sqlite-post-commit.js";
 import { runSqliteDeferredTransactionSync } from "../../infra/sqlite-transaction.js";
+import type { DB as AgentDatabaseSchema } from "../../state/openclaw-agent-db.generated.js";
 import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { readSelectedSessionEntriesInDatabase } from "./session-accessor.sqlite-entry-list.read.js";
 import { projectSqliteSessionParticipantsBatch } from "./session-accessor.sqlite-participant-projection.js";
@@ -10,6 +16,34 @@ import {
   normalizeStoreSessionKey,
   resolveSessionEntryCandidates,
 } from "./store-entry.js";
+
+/** Check physical rows before transcript initialization can claim or reuse them. */
+export function assertSessionCreationTargetAbsent(
+  database: OpenClawAgentDatabase,
+  { sessionKey, sessionId }: { sessionKey: string; sessionId: string },
+): void {
+  const db = getNodeSqliteKysely<AgentDatabaseSchema>(database.db);
+  const keys = sqliteStringSet(collectSessionEntryLookupKeys(sessionKey));
+  const occupied = executeSqliteQueryTakeFirstSync(
+    database.db,
+    db
+      .selectFrom("session_nodes")
+      .select("session_key")
+      .where((eb) =>
+        eb.or([eb("session_key", "in", keys), eb("current_session_id", "=", sessionId)]),
+      )
+      .unionAll(
+        db
+          .selectFrom("session_windows")
+          .select("session_key")
+          .where((eb) => eb.or([eb("session_key", "in", keys), eb("session_id", "=", sessionId)])),
+      )
+      .limit(1),
+  );
+  if (occupied) {
+    throw new Error("Session creation requires an absent target");
+  }
+}
 
 /** Recheck the explicit claim inside the transaction that writes its session row. */
 export function assertSessionCreationLabelAvailable(

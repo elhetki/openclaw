@@ -103,6 +103,7 @@ type CreationProjection = {
   scope: ResolvedSqliteScope & { path: string; env: NodeJS.ProcessEnv };
   sessionKey: string;
   creationSnapshot: SessionCreationSnapshot & { databaseIdentity: string };
+  absentCreationTarget?: SessionEntryReplacementCommit["absentCreationTarget"];
   initializeTranscript?: { sessionKey: string; sessionId: string; cwd?: string };
   onWriterAdmitted?: () => void;
 };
@@ -501,6 +502,7 @@ async function applySqliteSessionEntryReplacementProjection<T, TReplacement>(
               consumePendingReset: params.consumePendingReset,
               ownerAssignment: params.ownerAssignment,
               labelClaim: params.labelClaim,
+              absentCreationTarget: creation?.absentCreationTarget,
               preparedTranscript: params.preparedTranscript,
               maintenance,
             };

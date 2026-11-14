@@ -6,7 +6,10 @@ import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { readSessionActivitySummary } from "./activity-summary.js";
 import { isInternalSessionEffectsKey } from "./internal-session-key.js";
 import { hasPendingSessionTranscriptArchives } from "./session-accessor.sqlite-archive-store-kernel.js";
-import { assertSessionCreationLabelAvailable } from "./session-accessor.sqlite-creation-read.js";
+import {
+  assertSessionCreationLabelAvailable,
+  assertSessionCreationTargetAbsent,
+} from "./session-accessor.sqlite-creation-read.js";
 import {
   sessionSharingEntriesEqual,
   type SessionEntryProjectionFacts,
@@ -217,6 +220,9 @@ export function commitSessionEntryReplacementsInDatabase(
   onArchived?: (sessionKey: string, previous: SessionEntry, current: SessionEntry) => void,
   postimages?: SessionEntryWritePostimages,
 ): SessionEntryReplacementCommitted {
+  if (input.absentCreationTarget) {
+    assertSessionCreationTargetAbsent(database, input.absentCreationTarget);
+  }
   if (input.labelClaim) {
     assertSessionCreationLabelAvailable(
       database,

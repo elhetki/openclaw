@@ -748,6 +748,89 @@ it.each([false, true])(
   },
 );
 
+it("commits a caller-planned session and refuses to adopt it on replay", async () => {
+  await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+    const scope = {
+      agentId: "main",
+      sessionKey: "agent:main:planned-create",
+      storePath: state.statePath("agents", "main", "sessions", "openclaw-agent.sqlite"),
+    };
+    const planned = {
+      sessionId: "planned-session",
+      lifecycleRevision: "planned-revision",
+      updatedAt: 1,
+    };
+    const create = () =>
+      createSessionEntryWithTranscript(scope, () => ({ ok: true, entry: planned }), {
+        requireAbsent: true,
+        cwd: "/workspace",
+      });
+
+    await expect(create()).resolves.toMatchObject({ ok: true, entry: planned });
+    await expect(create()).rejects.toThrow("Session creation requires an absent target");
+    const database = openOpenClawAgentDatabase({ agentId: "main", path: scope.storePath });
+    expect(readExactSessionEntryRow(database, scope.sessionKey)?.entry).toMatchObject(planned);
+    expect(
+      readTranscriptStorageRows(database, planned.sessionId).map((row) =>
+        JSON.parse(row.eventJson),
+      ),
+    ).toMatchObject([{ type: "session", id: planned.sessionId, cwd: "/workspace" }]);
+  });
+});
+
+it.each(["exact placeholder", "alias placeholder", "physical session id"] as const)(
+  "revalidates physical absence before committing over a %s",
+  async (target) => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const database = openOpenClawAgentDatabase({ agentId: "main" });
+      const scope = {
+        agentId: "main",
+        sessionKey: "agent:main:signal:group:Planned",
+        storePath: database.path,
+      };
+      const planned = {
+        sessionId: "planned-session",
+        lifecycleRevision: "planned-revision",
+        updatedAt: 1,
+      };
+      const occupied = {
+        agentId: scope.agentId,
+        sessionKey:
+          target === "physical session id"
+            ? "agent:main:other-owner"
+            : target === "alias placeholder"
+              ? scope.sessionKey.toLowerCase()
+              : scope.sessionKey,
+        sessionId: target === "physical session id" ? planned.sessionId : "held-session",
+      };
+      await expect(
+        createSessionEntryWithTranscript(
+          scope,
+          ({ existingEntry, targetEntry }) => {
+            expect(existingEntry).toBeUndefined();
+            expect(targetEntry).toBeUndefined();
+            runOpenClawAgentWriteTransaction(
+              (writer) => ensureTranscriptHeader(writer, occupied, "/existing"),
+              { agentId: database.agentId, path: database.path },
+            );
+            return { ok: true, entry: planned };
+          },
+          { requireAbsent: true, cwd: "/workspace" },
+        ),
+      ).rejects.toThrow("Session creation requires an absent target");
+      expect(readExactSessionEntryRow(database, scope.sessionKey)).toBeUndefined();
+      expect(
+        readTranscriptStorageRows(database, occupied.sessionId).map((row) =>
+          JSON.parse(row.eventJson),
+        ),
+      ).toMatchObject([{ type: "session", id: occupied.sessionId, cwd: "/existing" }]);
+      if (occupied.sessionId !== planned.sessionId) {
+        expect(readTranscriptStorageRows(database, planned.sessionId)).toEqual([]);
+      }
+    });
+  },
+);
+
 it("checks both alias and canonical target after source custody is acquired", async () => {
   await withOpenClawTestState({ scenario: "minimal" }, async () => {
     const database = openOpenClawAgentDatabase({ agentId: "main" });

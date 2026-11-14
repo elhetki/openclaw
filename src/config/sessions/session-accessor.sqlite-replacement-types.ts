@@ -21,6 +21,7 @@ export type SessionEntryReplacementCommit = {
   labelOwnerKeys: string[];
   includeLabelOwners?: string;
   labelClaim?: { sessionKey: string; label: string };
+  absentCreationTarget?: { sessionKey: string; sessionId: string };
   preparedTranscript?: {
     sessionKey: string;
     sessionId: string;
