@@ -103,6 +103,7 @@ const CORE_GATEWAY_HANDLER_MODULES = {
   push: () => import("./push.js").then((module) => module.pushHandlers),
   restart: () => import("./restart.js").then((module) => module.restartHandlers),
   suspend: () => import("./suspend.js").then((module) => module.suspendHandlers),
+  maintenance: () => import("./maintenance.js").then((module) => module.maintenanceHandlers),
   send: () => import("./send.js").then((module) => module.sendHandlers),
   "sessions-files": () =>
     import("./sessions-files.js").then((module) => module.sessionsFilesHandlers),

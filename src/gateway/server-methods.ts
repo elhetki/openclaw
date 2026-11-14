@@ -156,7 +156,8 @@ export async function runWithGatewayRequestEnvelope<T>(
       },
     );
   };
-  const isSuspendPrepare = method === "gateway.suspend.prepare";
+  const isSuspendPrepare =
+    method === "gateway.suspend.prepare" || method === "gateway.maintenance.prepare";
   const preAdmissionRateLimitError = isSuspendPrepare
     ? rejectRateLimitedControlPlaneWrite()
     : undefined;

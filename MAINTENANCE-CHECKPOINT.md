@@ -16,13 +16,22 @@ Foundation checkpoint: `46535ee8`.
 - Missing state is disabled; malformed state fails closed. No expiry. Stale owners,
   conflicting replays and uncertain enrollment retries are refused. A pending
   enrollment cannot release or recover automatically.
-- An internal admission capability rejects ordinary/independent roots and restart
+- An admission capability rejects ordinary/independent roots and restart
   exceptions while existing admitted work can finish. Runtime reset does not clear
-  it. No production controller currently acquires this capability.
+  it. The explicit maintenance RPC controller acquires this capability.
 - Ordinary bootstrap refuses an active/malformed maintenance marker before session
   migrations, plugin bootstrap and channel/scheduler startup. This is a refusal,
   not a restored control-only server. Existing startup maintenance handling parks
   managed launchd and uses exit 78 for systemd policy; guidance preserves the marker.
+- `gateway.maintenance.prepare/status/release` now bind an existing authenticated
+  local operator device-token connection, exact token identity, and target. They
+  pause scheduling, inspect the complete existing work/custody inventory, persist
+  draining/held/released transitions, and guard worker commits. General session
+  creation and transient suspension controls cannot cross the held admission.
+  No connection/restart recovery or enrollment RPC is implemented yet.
+- Marker payload v2 adds the exact authenticated token identity key. The storage
+  key remains unchanged so source-only v1 markers are found and fail closed;
+  they are never silently treated as disabled or adopted under a successor token.
 
 ## Proof executed
 
@@ -42,6 +51,13 @@ Foundation checkpoint: `46535ee8`.
 - Upstream autoreview reported scoped-clean P0–P2 for the foundation and for the
   startup delta with full bootstrap/store context. It used the bundled native
   Codex CLI through the helper's supported `--codex-bin`; isolation was retained.
+- Runtime RPC proof: native real-dispatcher/SQLite fixture plus admission and
+  suspension siblings passed (30 tests, 28.21 s); protocol siblings passed
+  (11 tests, 11.38 s). After the exact-token repair, state/store/runtime fixtures
+  passed (7 tests, 20.74 s), and targeted production typecheck/lint passed.
+  The fixture explicitly constructs transport attestations: it does not prove a
+  public WebSocket handshake. Review found a P2 successor-token takeover, which
+  was repaired and regression-tested; the follow-up review was scoped-clean P0–P2.
 
 ## Required next patch sequence
 
@@ -51,14 +67,16 @@ Foundation checkpoint: `46535ee8`.
    must restore admission before producer setup. Never use minimal-test or
    update-canary flags as production authority. Current refusal must remain until
    real restart tests prove the replacement path.
-2. Add a single runtime owner and protocol descriptors/schemas/handlers. Bind the
+2. Extend the runtime owner into recovery. Existing protocol handlers bind the
    generation to the authenticated, current coordinator device token and exact
    agent/session; reject shared-token, other-device, stale-owner and revoked
    credentials. Revalidate at effect commit after awaits. Syntax validation of
    the stored binding is not authentication.
-3. Close admission before persisting begin, pause cron scheduling, and join the
+3. The runtime handlers now close admission before persisting begin, pause cron
+   scheduling, and inspect the
    complete `createGatewayActiveWorkSnapshot` plus server inspectors and write
-   custody. Preserve exact pending-operation continuations while draining. Never
+   custody. Qualify this through public WebSocket and lifecycle tests, including
+   exact pending-operation continuations while draining. Never
    call a snapshot with omitted inspectors an all-writer proof. Keep closure on
    persistence/inspection failure; no timer may reopen it.
 4. Introduce one capability-scoped enrollment operation, not an exemption for

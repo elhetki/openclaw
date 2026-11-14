@@ -23,6 +23,7 @@ await withOpenClawTestState({ label: "gateway-maintenance" }, async (state) => {
         binding: {
           deviceId: "a".repeat(64),
           publicKey: "b".repeat(43),
+          tokenIdentityKey: "c".repeat(64),
           agentId: "fixture",
           sessionKey: "agent:fixture:direct:fixture",
         },

@@ -13,6 +13,7 @@ import {
   getGatewayRestartDrainSignal,
   getGatewaySuspendAdmissionPhase,
   isGatewayRestartDraining,
+  isGatewayMaintenanceAdmissionHeld,
   retainGatewayRootWorkAdmissionContinuation,
 } from "../process/gateway-work-admission.js";
 import { AsyncWorkScope, getAsyncWorkSignal } from "../shared/async-work-scope.js";
@@ -24,9 +25,19 @@ const SUSPEND_CONTROL_METHODS = new Set([
   "gateway.suspend.status",
   "gateway.suspend.resume",
   "gateway.suspend.handoff",
+  "gateway.maintenance.prepare",
+  "gateway.maintenance.status",
+  "gateway.maintenance.release",
 ]);
 
 export function isGatewayRootlessRequestAllowed(method: string): boolean {
+  if (isGatewayMaintenanceAdmissionHeld()) {
+    return (
+      method === "gateway.maintenance.prepare" ||
+      method === "gateway.maintenance.status" ||
+      method === "gateway.maintenance.release"
+    );
+  }
   return (
     SUSPEND_CONTROL_METHODS.has(method) ||
     (method === "update.runs.get" &&
@@ -51,7 +62,8 @@ export function runGatewayPendingWorkContinuation<T>(params: {
     if (
       params.admission !== "continuation" &&
       getGatewaySuspendAdmissionPhase() !== "draining" &&
-      !isGatewayRestartDraining()
+      !isGatewayRestartDraining() &&
+      !isGatewayMaintenanceAdmissionHeld()
     ) {
       return null;
     }
@@ -73,7 +85,9 @@ export function runGatewayPendingWorkContinuation<T>(params: {
   }
   if (
     params.admission === "continuation" ||
-    (getGatewaySuspendAdmissionPhase() !== "draining" && !isGatewayRestartDraining()) ||
+    (getGatewaySuspendAdmissionPhase() !== "draining" &&
+      !isGatewayRestartDraining() &&
+      !isGatewayMaintenanceAdmissionHeld()) ||
     params.client?.connect.role !== "operator" ||
     typeof request.id !== "string"
   ) {

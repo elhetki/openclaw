@@ -150,6 +150,9 @@ export function scheduleGatewayRequestStart(
         request.method === "gateway.suspend.status" ||
         request.method === "gateway.suspend.resume" ||
         request.method === "gateway.suspend.handoff" ||
+        request.method === "gateway.maintenance.prepare" ||
+        request.method === "gateway.maintenance.status" ||
+        request.method === "gateway.maintenance.release" ||
         request.method === "gateway.restart.request" ||
         request.method === "update.status" ||
         request.method === "update.run");
@@ -157,6 +160,7 @@ export function scheduleGatewayRequestStart(
       request.method === "chat.history" ||
       request.method === "sessions.list" ||
       request.method === "gateway.suspend.status" ||
+      request.method === "gateway.maintenance.status" ||
       request.method === "update.status";
     const control =
       lifecycle ||

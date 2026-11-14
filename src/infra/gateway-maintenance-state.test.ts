@@ -15,6 +15,7 @@ const begin: GatewayMaintenanceCommand = {
   binding: {
     deviceId: "a".repeat(64),
     publicKey: "b".repeat(43),
+    tokenIdentityKey: "c".repeat(64),
     agentId: "fixture",
     sessionKey: "agent:fixture:direct:fixture",
   },
@@ -32,6 +33,7 @@ describe("persistent maintenance state", () => {
       null,
       {},
       { version: 2 },
+      { ...transitionGatewayMaintenance(undefined, begin), version: 1 },
       { ...transitionGatewayMaintenance(undefined, begin), phase: "enrolled" },
     ]) {
       expect(() => parseGatewayMaintenanceState(value)).toThrow(/reconciliation/);

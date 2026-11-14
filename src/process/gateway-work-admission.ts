@@ -273,7 +273,12 @@ function resolveSuspendOpenWaiters(): void {
   }
 }
 
-/** True while restart signal/drain or host suspension rejects new process work. */
+/** A durable-maintenance owner holds admission independently of transient suspension. */
+export function isGatewayMaintenanceAdmissionHeld(): boolean {
+  return GATEWAY_WORK_ADMISSION_STATE.maintenanceOwner !== undefined;
+}
+
+/** True while maintenance, restart or host suspension rejects new process work. */
 export function isGatewayWorkAdmissionClosed(): boolean {
   return (
     GATEWAY_WORK_ADMISSION_STATE.maintenanceOwner !== undefined ||

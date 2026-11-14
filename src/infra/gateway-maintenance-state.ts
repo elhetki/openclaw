@@ -5,6 +5,7 @@ export const gatewayMaintenanceStateKey = "gateway.maintenance.v1";
 export type GatewayMaintenanceBinding = {
   deviceId: string;
   publicKey: string;
+  tokenIdentityKey: string;
   agentId: string;
   sessionKey: string;
 };
@@ -15,7 +16,7 @@ export type GatewayMaintenanceReceipt = {
 };
 
 export type GatewayMaintenanceState = {
-  version: 1;
+  version: 2;
   generation: number;
   requestId: string;
   ownerInstanceId: string;
@@ -63,6 +64,8 @@ function binding(value: unknown): value is GatewayMaintenanceBinding {
     /^[a-f0-9]{64}$/.test(value.deviceId) &&
     typeof value.publicKey === "string" &&
     /^[A-Za-z0-9_-]{43}$/.test(value.publicKey) &&
+    typeof value.tokenIdentityKey === "string" &&
+    /^[a-f0-9]{64}$/.test(value.tokenIdentityKey) &&
     typeof value.agentId === "string" &&
     /^[a-z0-9][a-z0-9_-]{0,127}$/.test(value.agentId) &&
     typeof value.sessionKey === "string" &&
@@ -83,7 +86,7 @@ export function parseGatewayMaintenanceState(value: unknown): GatewayMaintenance
   }
   if (
     !isRecord(value) ||
-    value.version !== 1 ||
+    value.version !== 2 ||
     !Number.isSafeInteger(value.generation) ||
     Number(value.generation) < 1 ||
     !uuid(value.requestId) ||
@@ -105,6 +108,7 @@ function sameBinding(a: GatewayMaintenanceBinding, b: GatewayMaintenanceBinding)
   return (
     a.deviceId === b.deviceId &&
     a.publicKey === b.publicKey &&
+    a.tokenIdentityKey === b.tokenIdentityKey &&
     a.agentId === b.agentId &&
     a.sessionKey === b.sessionKey
   );
@@ -143,7 +147,7 @@ export function transitionGatewayMaintenance(
       return fail();
     }
     return {
-      version: 1,
+      version: 2,
       generation: (current?.generation ?? 0) + 1,
       requestId: command.requestId,
       ownerInstanceId: command.ownerInstanceId,

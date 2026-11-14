@@ -452,6 +452,15 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["controlUi.sessionPullRequests.subscribe", "control-ui", "operator.read", "2026.7"],
   ["controlUi.sessionPreview", "control-ui", "operator.read", "2026.8"],
   ["gateway.suspend.prepare", "suspend", "operator.admin", "2026.7", SIDECAR_CONTROL_PLANE_WRITE],
+  [
+    "gateway.maintenance.prepare",
+    "maintenance",
+    "operator.admin",
+    "2026.11.3",
+    SIDECAR_CONTROL_PLANE_WRITE,
+  ],
+  ["gateway.maintenance.status", "maintenance", "operator.admin", "2026.11.3"],
+  ["gateway.maintenance.release", "maintenance", "operator.admin", "2026.11.3"],
   ["gateway.suspend.status", "suspend", "operator.read", "2026.7"],
   // Resume is the safety escape hatch and must not sit behind write-rate limiting.
   ["gateway.suspend.resume", "suspend", "operator.admin", "2026.7"],

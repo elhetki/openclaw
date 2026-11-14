@@ -1,4 +1,5 @@
 // Explicit schema exports keep public protocol changes reviewable.
+export * from "./schema/gateway-maintenance.js";
 export * from "./schema/sessions-goal.js";
 export * from "./schema/session-processes.js";
 export * from "./schema/sessions-provider-review.js";

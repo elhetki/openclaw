@@ -32,6 +32,7 @@ export * from "./schema/desktop.js";
 export * from "./schema/frames.js";
 export * from "./schema/fs.js";
 export * from "./schema/gateway-suspend.js";
+export * from "./schema/gateway-maintenance.js";
 export * from "./schema/hooks.js";
 export * from "./schema/human-mentions.js";
 export * from "./schema/logs-chat.js";
