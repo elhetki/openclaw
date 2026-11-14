@@ -2,6 +2,7 @@ import { readGatewayMaintenanceState } from "../infra/gateway-maintenance-store.
 import { StartupMaintenanceRequiredError } from "../infra/startup-maintenance-required.js";
 import { holdGatewayMaintenanceAdmission } from "../process/gateway-work-admission.js";
 import { withArtifactPreservingStateReads } from "../state/artifact-preserving-state-reads.js";
+import { createOpenClawDatabaseMaintenanceScope } from "../state/openclaw-state-db-async-lifecycle.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import type { GatewayServer, GatewayServerOptions } from "./server-public.js";
 import { rethrowGatewayStartupError } from "./server-shutdown.js";
@@ -148,6 +149,10 @@ export async function startGatewayMaintenanceIfRequired(
       await closeOpenClawStateDatabaseByPathAsync(resolveOpenClawStateSqlitePath());
     };
     let server: Awaited<ReturnType<typeof startMaintenanceControlServer>> | undefined;
+    const enrollmentResources = createOpenClawDatabaseMaintenanceScope({
+      assertOwnerCurrent: assertOwner,
+      assertDatabaseAccess: (path) => options.gatewayStateOwner!.assertDatabaseAccess(path),
+    });
     try {
       observation.start();
       await ready.promise;
@@ -163,6 +168,7 @@ export async function startGatewayMaintenanceIfRequired(
         state: selected,
         admission,
         assertCurrent: assertOwner,
+        enrollment: { config: cfg, resources: enrollmentResources },
         onListening: options.gatewayStateOwner?.markListening,
       });
       assertOwner();
@@ -175,6 +181,7 @@ export async function startGatewayMaintenanceIfRequired(
         close: (closeOptions) =>
           (closing ??= (async () => {
             await ownedServer.close(closeOptions);
+            await enrollmentResources.close();
             await observation.stop();
             await closeDatabase();
             if (ownedServer.isDurablyReleased()) {
@@ -185,6 +192,7 @@ export async function startGatewayMaintenanceIfRequired(
     } catch (error) {
       return rethrowGatewayStartupError(error, async () => {
         await server?.close();
+        await enrollmentResources.close();
         await observation.stop();
         await closeDatabase();
       });

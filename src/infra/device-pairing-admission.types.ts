@@ -12,6 +12,14 @@ export type NodePairingPendingSnapshot = Pick<PairedDevicePendingNodeSurface, "r
 
 export type DevicePairingAdmissionFacts =
   | {
+      kind: "maintenance-enrollment";
+      generation: number;
+      requestId: string;
+      deviceId: string;
+      agentId: string;
+      sessionKey: string;
+    }
+  | {
       kind: "maintenance-bootstrap";
       requestId: string;
       deviceId: string;

@@ -1,69 +1,42 @@
 import { readConfigMachineStateRowInDatabase } from "../state/config-machine-state-row.js";
 import { writeConfigMachineStateInDatabase } from "../state/config-machine-state-write.js";
 import type { WorkerWriteOperationContext } from "../state/worker-operation-registry.js";
-import { isPairedDeviceTokenIdentityCurrent } from "./device-pairing-identity.js";
-import { readPairedDevicePairingSnapshotFromDatabase } from "./device-pairing-store.js";
+import {
+  readAuthorizedGatewayMaintenanceInDatabase,
+  readGatewayMaintenanceHomeCredentialInDatabase,
+  type GatewayMaintenanceAuthority,
+} from "./gateway-maintenance-authority.kernel.js";
 import {
   gatewayMaintenanceStateKey,
   transitionGatewayMaintenance,
-  parseGatewayMaintenanceState,
-  type GatewayMaintenanceBinding,
   type GatewayMaintenanceCommand,
 } from "./gateway-maintenance-state.js";
-import { verifyPairingToken } from "./pairing-token.js";
 
 export const gatewayMaintenanceOperations = {
   "gatewayMaintenance.recovery": (
-    input: {
-      generation: number;
-      binding: GatewayMaintenanceBinding;
-      token: string;
-      sharedAuthGeneration?: string;
+    input: GatewayMaintenanceAuthority & {
       command?:
-        | Extract<GatewayMaintenanceCommand, { action: "recover" }>
+        | Extract<GatewayMaintenanceCommand, { action: "recover" | "recover-enrollment" }>
         | { action: "hold" | "release"; generation: number; ownerInstanceId: string };
     },
     context: WorkerWriteOperationContext,
   ) =>
     context.write(
       ({ db }) => {
-        const row = readConfigMachineStateRowInDatabase(db, gatewayMaintenanceStateKey);
-        const state = parseGatewayMaintenanceState(row ? JSON.parse(row.value_json) : undefined);
-        const binding = input.binding;
-        const device =
-          readPairedDevicePairingSnapshotFromDatabase(db, binding.deviceId).pairedByDeviceId[
-            binding.deviceId
-          ] ?? null;
-        if (
-          !state ||
-          state.generation !== input.generation ||
-          state.binding.deviceId !== binding.deviceId ||
-          state.binding.publicKey !== binding.publicKey ||
-          state.binding.tokenIdentityKey !== binding.tokenIdentityKey ||
-          state.binding.agentId !== binding.agentId ||
-          state.binding.sessionKey !== binding.sessionKey ||
-          device?.publicKey !== binding.publicKey ||
-          !verifyPairingToken(input.token, device.tokens?.operator?.token ?? "") ||
-          !isPairedDeviceTokenIdentityCurrent(
-            device,
-            "operator",
-            { deviceId: binding.deviceId, key: binding.tokenIdentityKey },
-            ["operator.admin"],
-          ) ||
-          (device.tokens?.operator?.issuer &&
-            device.tokens.operator.issuer.generation !== input.sharedAuthGeneration)
-        ) {
-          throw new Error("Maintenance coordinator authority changed");
-        }
+        const state = readAuthorizedGatewayMaintenanceInDatabase({ db }, input);
         if (!input.command) {
           return state;
         }
         if (
-          !["draining", "held"].includes(state.phase) ||
-          !["recover", "hold", "release"].includes(input.command.action) ||
+          !["draining", "held", "enrollment_pending", "enrolled"].includes(state.phase) ||
+          !["recover", "recover-enrollment", "hold", "release"].includes(input.command.action) ||
+          (["enrollment_pending", "enrolled"].includes(state.phase) && !state.enrollment) ||
           input.command.generation !== input.generation
         ) {
           throw new Error("Maintenance recovery command refused");
+        }
+        if (state.enrollment) {
+          readGatewayMaintenanceHomeCredentialInDatabase({ db }, state);
         }
         const next = transitionGatewayMaintenance(state, input.command);
         writeConfigMachineStateInDatabase(db, gatewayMaintenanceStateKey, next);

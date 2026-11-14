@@ -8,8 +8,13 @@ import {
 } from "./device-pairing-join-code.worker.js";
 import * as tokens from "./device-pairing-tokens.kernel.js";
 import { bootstrapGatewayMaintenanceInWorker } from "./gateway-maintenance-bootstrap.kernel.js";
+import { enrollGatewayMaintenanceHomeInWorker } from "./gateway-maintenance-home.kernel.js";
 
 export const devicePairingOperations = {
+  "devicePairing.enrollMaintenanceHome": devicePairingMutation(
+    (input: Parameters<typeof enrollGatewayMaintenanceHomeInWorker>[0], { database }) =>
+      enrollGatewayMaintenanceHomeInWorker(input, database),
+  ),
   "devicePairing.bootstrapMaintenance": devicePairingMutation(
     (input: Parameters<typeof bootstrapGatewayMaintenanceInWorker>[0], { database }) =>
       bootstrapGatewayMaintenanceInWorker(input, database),

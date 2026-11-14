@@ -15,6 +15,14 @@ export type GatewayMaintenanceReceipt = {
   lifecycleRevision: string;
 };
 
+export type GatewayMaintenanceEnrollment = {
+  requestId: string;
+  deviceId: string;
+  publicKey: string;
+  tokenIdentityKey: string;
+  planned: GatewayMaintenanceReceipt;
+};
+
 export type GatewayMaintenanceState = {
   version: 2;
   generation: number;
@@ -23,9 +31,22 @@ export type GatewayMaintenanceState = {
   binding: GatewayMaintenanceBinding;
   phase: "draining" | "held" | "enrollment_pending" | "enrolled" | "released";
   receipt?: GatewayMaintenanceReceipt;
+  enrollment?: GatewayMaintenanceEnrollment;
 };
 
 export type GatewayMaintenanceCommand =
+  | {
+      action: "prepare-enrollment";
+      generation: number;
+      ownerInstanceId: string;
+      enrollment: GatewayMaintenanceEnrollment;
+    }
+  | {
+      action: "recover-enrollment";
+      generation: number;
+      ownerInstanceId: string;
+      previousOwnerInstanceId: string;
+    }
   | {
       action: "begin";
       requestId: string;
@@ -79,6 +100,24 @@ function receipt(value: unknown): value is GatewayMaintenanceReceipt {
   return isRecord(value) && uuid(value.sessionId) && uuid(value.lifecycleRevision);
 }
 
+function enrollment(value: unknown): value is GatewayMaintenanceEnrollment {
+  return (
+    isRecord(value) &&
+    uuid(value.requestId) &&
+    typeof value.deviceId === "string" &&
+    /^[a-f0-9]{64}$/.test(value.deviceId) &&
+    typeof value.publicKey === "string" &&
+    /^[A-Za-z0-9_-]{43}$/.test(value.publicKey) &&
+    typeof value.tokenIdentityKey === "string" &&
+    /^[a-f0-9]{64}$/.test(value.tokenIdentityKey) &&
+    receipt(value.planned)
+  );
+}
+
+function sameReceipt(a: GatewayMaintenanceReceipt, b: GatewayMaintenanceReceipt): boolean {
+  return a.sessionId === b.sessionId && a.lifecycleRevision === b.lifecycleRevision;
+}
+
 /** Missing state means never enabled. Malformed persisted state must never reopen admission. */
 export function parseGatewayMaintenanceState(value: unknown): GatewayMaintenanceState | undefined {
   if (value === undefined) {
@@ -97,7 +136,12 @@ export function parseGatewayMaintenanceState(value: unknown): GatewayMaintenance
     ) ||
     (value.receipt !== undefined && !receipt(value.receipt)) ||
     (value.phase === "enrolled" && value.receipt === undefined) ||
-    (!["enrolled", "released"].includes(String(value.phase)) && value.receipt !== undefined)
+    (!["enrolled", "released"].includes(String(value.phase)) && value.receipt !== undefined) ||
+    (value.enrollment !== undefined &&
+      (!enrollment(value.enrollment) ||
+        !["enrollment_pending", "enrolled", "released"].includes(String(value.phase)) ||
+        value.enrollment.deviceId === value.binding.deviceId ||
+        (value.receipt !== undefined && !sameReceipt(value.receipt, value.enrollment.planned))))
   ) {
     return fail();
   }
@@ -158,6 +202,19 @@ export function transitionGatewayMaintenance(
   if (!current || current.generation !== command.generation || current.phase === "released") {
     return fail();
   }
+  if (command.action === "recover-enrollment") {
+    if (
+      !current.enrollment ||
+      !["enrollment_pending", "enrolled"].includes(current.phase) ||
+      current.ownerInstanceId !== command.previousOwnerInstanceId ||
+      current.ownerInstanceId === command.ownerInstanceId
+    ) {
+      return fail();
+    }
+    // Preserve pending effects/receipt. This grants reconciliation ownership,
+    // never a new session identity or an implicit completion/release.
+    return { ...current, ownerInstanceId: command.ownerInstanceId };
+  }
   if (command.action === "recover") {
     if (
       current.ownerInstanceId !== command.previousOwnerInstanceId ||
@@ -179,13 +236,26 @@ export function transitionGatewayMaintenance(
   if (command.action === "hold" && current.phase === "draining") {
     return { ...current, phase: "held" };
   }
+  if (
+    command.action === "prepare-enrollment" &&
+    current.phase === "held" &&
+    enrollment(command.enrollment) &&
+    command.enrollment.deviceId !== current.binding.deviceId
+  ) {
+    return {
+      ...current,
+      phase: "enrollment_pending",
+      enrollment: structuredClone(command.enrollment),
+    };
+  }
   if (command.action === "enroll" && current.phase === "held") {
     return { ...current, phase: "enrollment_pending" };
   }
   if (
     command.action === "confirm" &&
     current.phase === "enrollment_pending" &&
-    receipt(command.receipt)
+    receipt(command.receipt) &&
+    (!current.enrollment || sameReceipt(command.receipt, current.enrollment.planned))
   ) {
     return { ...current, phase: "enrolled", receipt: { ...command.receipt } };
   }

@@ -5,13 +5,16 @@ import {
   PROTOCOL_VERSION,
   validateConnectParams,
   validateGatewayMaintenanceGenerationParams,
+  validateGatewayMaintenanceEnrollmentParams,
   validateRequestFrame,
 } from "../../packages/gateway-protocol/src/index.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createGatewayActiveWorkSnapshot } from "../infra/gateway-active-work.js";
 import type { GatewayMaintenanceState } from "../infra/gateway-maintenance-state.js";
 import { operateGatewayMaintenanceRecovery } from "../infra/gateway-maintenance-store.js";
 import { rawDataToString } from "../infra/ws.js";
 import type { holdGatewayMaintenanceAdmission } from "../process/gateway-work-admission.js";
+import type { OpenClawDatabaseMaintenanceScope } from "../state/openclaw-state-maintenance-context.js";
 import { verifyMaintenanceCoordinatorProof } from "./maintenance-coordinator-auth.js";
 import type { GatewayServer } from "./server-public.js";
 
@@ -25,6 +28,7 @@ export async function startMaintenanceControlServer(options: {
   admission: ReturnType<typeof holdGatewayMaintenanceAdmission>;
   assertCurrent: () => void;
   onListening?: () => void;
+  enrollment: { config: OpenClawConfig; resources: OpenClawDatabaseMaintenanceScope };
 }): Promise<GatewayServer & { isDurablyReleased: () => boolean }> {
   const hold = options.admission;
   const ownerInstanceId = randomUUID();
@@ -128,19 +132,30 @@ export async function startMaintenanceControlServer(options: {
                   "gateway.maintenance.status",
                   "gateway.maintenance.recover",
                   "gateway.maintenance.release",
+                  "gateway.maintenance.enroll",
                 ],
               },
             });
             return;
           }
+          const isEnrollment = frame.method === "gateway.maintenance.enroll";
+          const enrollment =
+            isEnrollment && validateGatewayMaintenanceEnrollmentParams(frame.params)
+              ? frame.params
+              : undefined;
+          const selectedGeneration = isEnrollment
+            ? enrollment?.generation
+            : validateGatewayMaintenanceGenerationParams(frame.params)
+              ? frame.params.generation
+              : undefined;
           if (
             ![
               "gateway.maintenance.status",
               "gateway.maintenance.recover",
               "gateway.maintenance.release",
+              "gateway.maintenance.enroll",
             ].includes(frame.method) ||
-            !validateGatewayMaintenanceGenerationParams(frame.params) ||
-            frame.params.generation !== generation ||
+            selectedGeneration !== generation ||
             busy
           ) {
             throw new Error("Maintenance command refused");
@@ -172,28 +187,107 @@ export async function startMaintenanceControlServer(options: {
             }
           };
           if (frame.method === "gateway.maintenance.recover") {
-            if (!["draining", "held"].includes(state.phase)) {
+            if (!["draining", "held"].includes(state.phase) && !state.enrollment) {
               throw new Error("Maintenance receipt requires reconciliation");
             }
             if (state.ownerInstanceId !== ownerInstanceId) {
-              state = await transition({
-                action: "recover",
-                generation,
-                ownerInstanceId,
-                previousOwnerInstanceId: state.ownerInstanceId,
-              });
+              state = await transition(
+                {
+                  action: state.enrollment ? "recover-enrollment" : "recover",
+                  generation,
+                  ownerInstanceId,
+                  previousOwnerInstanceId: state.ownerInstanceId,
+                },
+                assertIdle,
+              );
             }
             if (state.phase === "draining" && inspect().idle) {
               state = await transition({ action: "hold", generation, ownerInstanceId }, assertIdle);
             }
-          } else if (frame.method === "gateway.maintenance.release") {
-            if (state.ownerInstanceId !== ownerInstanceId || state.phase !== "held") {
-              throw new Error("Maintenance release requires this process's held generation");
+          } else if (enrollment) {
+            if (
+              state.ownerInstanceId !== ownerInstanceId ||
+              !["held", "enrollment_pending", "enrolled"].includes(state.phase)
+            ) {
+              throw new Error("Maintenance enrollment requires this process's held generation");
             }
-            state = await transition(
-              { action: "release", generation, ownerInstanceId },
-              assertIdle,
-            );
+            assertIdle();
+            const { prepareGatewayMaintenanceHomeDevice, enrollGatewayMaintenanceHomeSession } =
+              await import("./maintenance-enrollment.js");
+            assertConnection();
+            const selected = {
+              ...input,
+              ownerInstanceId,
+              request: {
+                requestId: enrollment.requestId,
+                homePublicKey: enrollment.homePublicKey,
+                agentId: enrollment.agentId,
+                sessionKey: enrollment.sessionKey,
+              },
+            };
+            let result;
+            try {
+              result =
+                enrollment.stage === "device"
+                  ? await prepareGatewayMaintenanceHomeDevice(selected, assertConnection)
+                  : await enrollGatewayMaintenanceHomeSession(selected, {
+                      ...options.enrollment,
+                      assertCurrent: assertConnection,
+                    });
+            } catch (error) {
+              uncertain = true;
+              throw error;
+            }
+            assertConnection();
+            send({
+              type: "res",
+              id,
+              ok: true,
+              payload: {
+                ...result,
+                processOwnerInstanceId: ownerInstanceId,
+                owned: true,
+                controlOnly: true,
+                readyForEnrollment: false,
+              },
+            });
+            return;
+          } else if (frame.method === "gateway.maintenance.release") {
+            if (
+              state.ownerInstanceId !== ownerInstanceId ||
+              state.phase !== "enrolled" ||
+              !state.enrollment ||
+              !state.receipt
+            ) {
+              throw new Error(
+                "Maintenance activation release requires the enrolled physical Home receipt",
+              );
+            }
+            assertIdle();
+            {
+              const { withVerifiedGatewayMaintenanceHomeSession } =
+                await import("./maintenance-enrollment.js");
+              assertConnection();
+              const recordedEnrollment = state.enrollment;
+              state = await withVerifiedGatewayMaintenanceHomeSession(
+                {
+                  ...input,
+                  ownerInstanceId,
+                  request: {
+                    requestId: recordedEnrollment.requestId,
+                    homePublicKey: recordedEnrollment.publicKey,
+                    agentId: binding.agentId,
+                    sessionKey: binding.sessionKey,
+                  },
+                },
+                { ...options.enrollment, assertCurrent: assertConnection },
+                (_receipt, assertPhysicalCurrent) =>
+                  transition(
+                    { action: "release", generation, ownerInstanceId },
+                    assertPhysicalCurrent,
+                  ),
+              );
+            }
             released = true;
             // Keep the admission hold and this control-only listener until explicit close/restart.
           }

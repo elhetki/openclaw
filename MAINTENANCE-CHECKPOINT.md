@@ -261,3 +261,154 @@ holds foreign writers and ordinary ingress for the whole enrollment transaction,
 plus SQL control-off and candidate Home/broker/socket/session/approval checks.
 Neither this checkpoint nor unit tests supply those deployment attestations.
 Do not enable pairing or populate approvals from this prototype.
+
+## Owner-only Home enrollment checkpoint
+
+This extends the cold-runtime checkpoint with two durable enrollment steps. It
+still reports `readyForEnrollment:false`: no immutable package, installed TEST
+command, host writer fence, or resource-capacity qualification is supplied here.
+The earlier statement that Home enrollment is unimplemented is superseded by
+this section. TEST activation and approval publication remain unavailable.
+
+The canonical session writer now offers `requireAbsent:true` through
+`createSessionEntryWithTranscript`. It refuses native/incognito fallback and
+checks physical session nodes, bounded canonical/alias keys, current physical
+IDs and retained transcript windows inside the write transaction, before header
+initialization. A transcript-only placeholder is occupied. Default ordinary
+creation semantics are unchanged. This separate reviewed change is `3962aaf7`
+(cherry-picked from `ddd2e96f`); 20 native worker tests, type/lint and P0–P2
+independent review passed.
+
+### Exact enrollment wire contract
+
+Use the existing root coordinator's signed v3 connection; never use the Home
+identity to call maintenance. The manifest-consented method is
+`gateway.maintenance.enroll`, with this closed params shape:
+
+```text
+{generation, stage:"device"|"session", requestId, homePublicKey, agentId, sessionKey}
+```
+
+`requestId` is a UUID journaled by root for this enrollment; it is distinct in
+meaning from the bootstrap intent's `state.requestId` (it may use the same UUID).
+`homePublicKey` is raw Ed25519 base64url, 43 characters, for a new device distinct
+from the coordinator. Root supplies no Home private key. The exact canonical
+agent/session must equal the durable generation binding. Both stages and all
+retries use exactly the same enrollment request ID, key and target.
+
+Device stage requires this process's held generation and an absent Home device.
+It approves the separate Home operator/admin credential (CLI client/mode, Linux)
+and records `enrollment_pending` plus planned physical IDs in the same shared
+SQLite transaction. It returns a secret receipt only on the root connection:
+
+```text
+{
+  version:1,
+  state,
+  credential:{deviceId,publicKey,role:"operator",token},
+  planned:{sessionId,lifecycleRevision},
+  processOwnerInstanceId, owned:true, controlOnly:true,
+  readyForEnrollment:false
+}
+```
+
+`state.enrollment` contains
+`{requestId,deviceId,publicKey,tokenIdentityKey,planned}`. The generation's original
+coordinator binding is unchanged. Planned IDs are not evidence of physical
+creation. Root keeps this entire receipt in its private journal; it must not
+publish credentials to Home/broker or populate approvals at this stage.
+An exact device-stage retry after enrollment also returns the existing final
+`receipt`; receipt presence follows authoritative state, not the requested stage.
+
+Session stage uses true physical absence CAS to create the exact planned session
+and header. If an earlier attempt already committed it, the stage accepts only
+the same key/sessionId/lifecycleRevision, no active writer, matching transcript
+header/session, a real transcript generation with `maxSeq:0`, and no message.
+It then confirms the physical receipt in shared state. Response has the same
+fields plus `receipt:{sessionId,lifecycleRevision}`; `state.phase` is `enrolled`
+and `state.receipt` is identical. A different existing session or retained
+history is never adopted or overwritten. Pairing and agent-store custody remain
+held across confirmation; resource cleanup belongs to the cold listener's
+lifecycle, not a detached request.
+
+Source APIs in `src/gateway/maintenance-enrollment.ts`:
+`prepareGatewayMaintenanceHomeDevice(input, assertCurrent)`,
+`enrollGatewayMaintenanceHomeSession(input, options)`, and
+`withVerifiedGatewayMaintenanceHomeSession(input, options, consume)`.
+Internal input is `{generation,binding,token,ownerInstanceId,request}`; `request`
+is the four enrollment fields without generation/stage. Options carry the
+already admitted config, current-authority guard and listener-owned resource
+scope. These internal functions do not authenticate a network caller themselves;
+the cold transport owns signed admission and invokes them under the held fence.
+
+### Recovery and activation release
+
+Lost acknowledgment never authorizes a fresh key, request ID, physical ID or
+target. Restart the exact trusted cold process, authenticate root, inspect state,
+and explicitly recover ownership. Recovery preserves pending/enrolled plans and
+receipts. Retry the same device/session stage; physical-only committed state is
+reconciled before shared confirmation. Changed/revoked Home or root credential,
+changed target, mismatching physical incarnation, or transcript content refuses.
+Mutation uncertainty closes the current connection/runtime; it does not release.
+
+Cold `gateway.maintenance.release` still accepts exactly `{generation}` but is
+now **activation-only**: held without an enrolled Home receipt is refused.
+Pending is refused. For enrolled state, it rechecks the current Home credential
+and exact empty physical session under retained reader/pairing custody, then
+performs the shared release CAS. A changed lifecycle revision or transcript
+message leaves state enrolled and ordinary startup blocked. There is no abort
+endpoint in this slice; abandoned setup requires a human-reviewed recovery
+procedure. This intentionally tightens the older cold checkpoint's held release.
+Success returns the existing status payload with `state.phase:"released"` and
+both enrollment and physical receipt retained; the same process still never
+starts normal ingress. Root must verify these exact receipts before any approval
+publication and arrange a separate fresh normal process only after all host and
+SQL gates qualify.
+
+**Activation blocker: released-state lost acknowledgment.** If release commits
+but its acknowledgment is lost and the cold process dies or latches uncertain,
+`maintenance-run` refuses the released marker. This checkpoint has no authenticated
+offline read-only released-receipt operation. Root must retain its host fence and
+withhold approval publication and normal restart until a reviewed reconciliation
+procedure establishes the exact released receipt. Service exit, a timeout or a
+bootstrap retry is not evidence of successful release.
+
+The v3 exchange authenticates root to the listener, **not the loopback server to
+root**. Before accepting any receipt, root must independently pin the listener
+to its supervised unit/process UID, exact executable/package digest, port and
+process start identity, under its held foreign-writer/config fence. A signature,
+loopback URL or maintenance hello alone cannot supply that host attestation.
+
+### Focused evidence and limits
+
+Integrated source review since `090c5907` reported scoped-clean P0–P2 with Sol
+medium. Its explicit limits remain the excluded canonical token-comparison helper,
+external host fencing and VM/package behavior. Runtime tests are separate evidence.
+Shared Home pairing/state/recovery passed 7 tests (21.90 seconds), including
+rollback after device and intent writes, discarded-ack reopen/retry, exact
+request/key/target rejection, preserved pending ownership recovery, and Home
+credential rotation refusal. Public WS two-stage enrollment passed (21.93 seconds);
+cold held/pending/enrolled process restart and exact receipt retries passed
+(44.83 seconds). Post-enrollment transcript mutation denied release (16.17 seconds).
+The session-mutation fixture initially omitted the explicit store path and hit
+the intentionally absent normal runtime config; after binding its exact store,
+revision mutation denied release and ordinary startup remained blocked (16.25
+seconds). The cross-DB interruption fixture commits through the canonical creator
+under real offline ownership with the listener stopped, preserves shared pending
+state, then reopens the actual cold listener and reconciles the same physical
+receipt. This is a deterministic durable interruption cut, not a timed process
+kill or an installed host-pipe crash test. The final strengthened case passed in
+52.64 seconds and explicitly observed the committed physical row while shared
+state was still pending before restarting the cold listener.
+
+Integrated core typecheck and touched-file lint passed. The canonical full build
+on Node 26.1.0 passed in 15 minutes 6.4 seconds, including workspace declarations,
+unified declarations, SDK exports, core and 98 plugin bundles, UI and startup
+import checks. This is source/build evidence; no final immutable runtime package
+or installed Linux service has been qualified by this checkpoint.
+
+No broad suite, browser, provider inference, VM, database service, Home/broker,
+Telegram, public ingress, or package deployment was exercised. Root host fences,
+real principal/config provenance, live SQL control-off and receipt binding,
+private-pipe/UID isolation, process/listener attestation, final package provenance
+and the existing 4 GB VM capacity remain required activation gates.

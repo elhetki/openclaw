@@ -73,6 +73,9 @@ export const validateGatewayMaintenancePrepareParams = compile(
 export const validateGatewayMaintenanceGenerationParams = compile(
   S.GatewayMaintenanceGenerationParamsSchema,
 );
+export const validateGatewayMaintenanceEnrollmentParams = compile(
+  S.GatewayMaintenanceEnrollmentParamsSchema,
+);
 export const validateGatewaySuspendPrepareResult = compile(S.GatewaySuspendPrepareResultSchema);
 export const validateGatewaySuspendStatusParams = compile(S.GatewaySuspendStatusParamsSchema);
 export const validateGatewaySuspendStatusResult = compile(S.GatewaySuspendStatusResultSchema);

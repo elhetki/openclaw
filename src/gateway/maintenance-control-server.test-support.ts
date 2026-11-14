@@ -8,6 +8,7 @@ import { buildDeviceAuthPayloadV3 } from "../../packages/gateway-client/src/devi
 import { PROTOCOL_VERSION } from "../../packages/gateway-protocol/src/index.js";
 import { runNodeScript } from "../../test/helpers/run-node-script.js";
 import { readConfigFileSnapshotWithPluginMetadata } from "../config/io.js";
+import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
 import {
   deriveDeviceIdFromPublicKey,
   publicKeyRawBase64UrlFromPem,
@@ -80,7 +81,8 @@ function peer(port: number) {
 
 await withOpenClawTestState({ label: "maintenance-public-control" }, async (fixture) => {
   const mode = process.argv[2] ?? "public";
-  const cold = mode === "cold";
+  const cold = mode === "cold" || mode === "pending-physical";
+  const mutated = mode === "mutated-session" || mode === "mutated-transcript";
   const runtimeMarker = fixture.path("plugin-ran");
   await fixture.writeJson("plugin/openclaw.plugin.json", {
     id: "maintenance-fixture",
@@ -368,6 +370,204 @@ await withOpenClawTestState({ label: "maintenance-public-control" }, async (fixt
       (await client.call("gateway.maintenance.enroll", { generation: state.generation })).ok,
       false,
     );
+    assert.equal(
+      (await client.call("gateway.maintenance.release", { generation: state.generation })).ok,
+      false,
+      "Held without a physical Home receipt cannot authorize activation",
+    );
+    if (!cold) {
+      await assert.rejects(
+        assertOrdinaryGatewayMaintenanceReleased(),
+        /ordinary startup remains disabled/,
+      );
+    }
+    const homeKey = publicKeyRawBase64UrlFromPem(
+      generateKeyPairSync("ed25519").publicKey.export({ type: "spki", format: "pem" }),
+    );
+    const enrollment = {
+      generation: state.generation,
+      requestId: randomUUID(),
+      homePublicKey: homeKey,
+      agentId: binding.agentId,
+      sessionKey: binding.sessionKey,
+    };
+    const paired = await client.call("gateway.maintenance.enroll", {
+      ...enrollment,
+      stage: "device",
+    });
+    assert.equal(paired.ok, true, JSON.stringify(paired.error));
+    const pending = record(paired.payload);
+    assert.equal(record(pending.state).phase, "enrollment_pending");
+    assert.equal(pending.receipt, undefined);
+    assert.equal(
+      (await client.call("gateway.maintenance.release", { generation: state.generation })).ok,
+      false,
+    );
+    if (cold) {
+      for (const previous of peers) {
+        previous.socket.terminate();
+      }
+      await server.close();
+      if (mode === "pending-physical") {
+        // Materialize the exact durable interruption cut with the same canonical
+        // creator: agent COMMIT happened, shared confirmation/reply did not.
+        // The child is stopped and real offline ownership is held throughout.
+        const { createOpenClawDatabaseMaintenanceScope } =
+          await import("../state/openclaw-state-db-async-lifecycle.js");
+        const { resolveOpenClawStateSqlitePath } =
+          await import("../state/openclaw-state-db.paths.js");
+        const { createSessionEntryWithTranscript } =
+          await import("../config/sessions/session-accessor.js");
+        const { readSessionEntriesFromStoreInWorker } =
+          await import("../config/sessions/session-entry-read-runtime.js");
+        const offline = await acquireGatewayLock({
+          listenerMode: "foreground",
+          allowInTests: true,
+        });
+        assert.ok(offline);
+        const guard = () => offline.assertDatabaseAccess(resolveOpenClawStateSqlitePath());
+        const resources = createOpenClawDatabaseMaintenanceScope({
+          assertOwnerCurrent: guard,
+          assertDatabaseAccess: (path) => offline.assertDatabaseAccess(path),
+        });
+        try {
+          const planned = record(pending.planned);
+          const committedPhysical = await resources.run(() =>
+            createSessionEntryWithTranscript(
+              {
+                agentId: binding.agentId,
+                sessionKey: binding.sessionKey,
+                storePath: resolveSessionStorePathCore(undefined, { agentId: binding.agentId }),
+                env: process.env,
+              },
+              () => ({
+                ok: true,
+                entry: {
+                  sessionId: String(planned.sessionId),
+                  lifecycleRevision: String(planned.lifecycleRevision),
+                  updatedAt: Date.now(),
+                  chatType: "direct",
+                  spawnDepth: 0,
+                },
+              }),
+              { requireAbsent: true, commitGuard: guard, cwd: fixture.workspaceDir },
+            ),
+          );
+          assert.equal(committedPhysical.ok, true);
+          const physicalBeforeRestart = await resources.run(() =>
+            readSessionEntriesFromStoreInWorker({
+              agentId: binding.agentId,
+              storePath: resolveSessionStorePathCore(undefined, { agentId: binding.agentId }),
+              env: process.env,
+              sessionKeys: [binding.sessionKey],
+              projection: "exact",
+            }),
+          );
+          assert.equal(physicalBeforeRestart.entries.length, 1);
+          assert.equal(physicalBeforeRestart.entries[0].entry.sessionId, planned.sessionId);
+          assert.equal(
+            physicalBeforeRestart.entries[0].entry.lifecycleRevision,
+            planned.lifecycleRevision,
+          );
+          assert.equal((await readGatewayMaintenanceState())?.phase, "enrollment_pending");
+        } finally {
+          await resources.close();
+          await closeStateDatabaseForTest();
+          await offline.release();
+        }
+      }
+      server = await launchCold();
+      ({ client, result } = await connect());
+      assert.equal(result.ok, true);
+      assert.equal(
+        (await client.call("gateway.maintenance.release", { generation: state.generation })).ok,
+        false,
+      );
+      const recoveredPending = await client.call("gateway.maintenance.recover", {
+        generation: state.generation,
+      });
+      assert.equal(recoveredPending.ok, true);
+      assert.equal(record(record(recoveredPending.payload).state).phase, "enrollment_pending");
+    }
+    const pairRetry = await client.call("gateway.maintenance.enroll", {
+      ...enrollment,
+      stage: "device",
+    });
+    assert.equal(pairRetry.ok, true);
+    assert.deepEqual(record(pairRetry.payload).planned, pending.planned);
+    assert.deepEqual(record(pairRetry.payload).credential, pending.credential);
+    const enrolled = await client.call("gateway.maintenance.enroll", {
+      ...enrollment,
+      stage: "session",
+    });
+    assert.equal(enrolled.ok, true, JSON.stringify(enrolled.error));
+    const physical = record(enrolled.payload);
+    assert.equal(record(physical.state).phase, "enrolled");
+    assert.deepEqual(physical.receipt, pending.planned);
+    const enrollmentRetry = await client.call("gateway.maintenance.enroll", {
+      ...enrollment,
+      stage: "session",
+    });
+    assert.equal(enrollmentRetry.ok, true);
+    assert.deepEqual(record(enrollmentRetry.payload).receipt, physical.receipt);
+    if (cold) {
+      for (const previous of peers) {
+        previous.socket.terminate();
+      }
+      await server.close();
+      server = await launchCold();
+      ({ client, result } = await connect());
+      assert.equal(result.ok, true);
+      assert.equal(
+        (await client.call("gateway.maintenance.release", { generation: state.generation })).ok,
+        false,
+      );
+      const recoveredPhysical = await client.call("gateway.maintenance.recover", {
+        generation: state.generation,
+      });
+      assert.equal(recoveredPhysical.ok, true);
+      assert.equal(record(record(recoveredPhysical.payload).state).phase, "enrolled");
+      const reconciled = await client.call("gateway.maintenance.enroll", {
+        ...enrollment,
+        stage: "session",
+      });
+      assert.equal(reconciled.ok, true);
+      assert.deepEqual(record(reconciled.payload).receipt, physical.receipt);
+    }
+    if (mutated) {
+      const { updateSessionEntry, appendTranscriptMessage } =
+        await import("../config/sessions/session-accessor.js");
+      const scope = {
+        agentId: binding.agentId,
+        sessionKey: binding.sessionKey,
+        storePath: resolveSessionStorePathCore(undefined, { agentId: binding.agentId }),
+        env: process.env,
+      };
+      if (mode === "mutated-session") {
+        const changed = await updateSessionEntry(scope, () => ({
+          lifecycleRevision: randomUUID(),
+        }));
+        assert.ok(changed);
+        assert.notEqual(changed.lifecycleRevision, record(physical.receipt).lifecycleRevision);
+      } else {
+        await appendTranscriptMessage(
+          { ...scope, sessionId: String(record(physical.receipt).sessionId) },
+          { message: { role: "user", content: "Synthetic retained fixture message" } },
+        );
+      }
+      assert.equal(
+        (await client.call("gateway.maintenance.release", { generation: state.generation })).ok,
+        false,
+        "Changed physical state must never release activation",
+      );
+      assert.equal((await readGatewayMaintenanceState())?.phase, "enrolled");
+      await assert.rejects(
+        assertOrdinaryGatewayMaintenanceReleased(),
+        /ordinary startup remains disabled/,
+      );
+      assert.equal(existsSync(runtimeMarker), false);
+      return;
+    }
     const released = await client.call("gateway.maintenance.release", {
       generation: state.generation,
     });
