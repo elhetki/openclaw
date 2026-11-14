@@ -59,6 +59,25 @@ Foundation checkpoint: `46535ee8`.
   public WebSocket handshake. Review found a P2 successor-token takeover, which
   was repaired and regression-tested; the follow-up review was scoped-clean P0–P2.
 
+## Recovery transaction checkpoint
+
+The internal `gatewayMaintenance.recovery` worker operation now rechecks the
+stored generation, every binding field, the exact current paired operator token,
+its approved admin ceiling, and any shared-auth issuer generation inside the
+same transaction as recovery/hold/release. Status uses the same authority check.
+It never adopts successor credentials and refuses mutations of pending/enrolled
+receipts. This is an internal owner primitive, not a public authenticator: callers
+must first prove device key/token possession and retain live transport authority.
+No recovery listener or startup bypass is installed by this checkpoint.
+
+A native host-writer fixture uses real pairing approval/token rotation/revocation
+and SQLite reopen. It covers stale target/generation/owner, precommit transport
+revocation, explicit recover/hold/release, pending/enrolled refusal, token
+replacement, issuer generation, and approved-scope removal. State/store/recovery
+siblings passed 7 tests (25.35 s); the expanded recovery fixture subsequently
+passed (9.65 s). The independent review and type evidence belong to the commit
+report; no public WebSocket or restart-recovery success is claimed.
+
 ## Required next patch sequence
 
 1. Split maintenance control bootstrap from normal startup in

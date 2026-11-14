@@ -7,6 +7,19 @@ import {
   parseGatewayMaintenanceState,
   type GatewayMaintenanceCommand,
 } from "./gateway-maintenance-state.js";
+import type { gatewayMaintenanceOperations } from "./gateway-maintenance-state.worker.js";
+
+/** Recovery commands recheck the exact current paired token inside the same transaction. */
+export async function operateGatewayMaintenanceRecovery(
+  input: Parameters<(typeof gatewayMaintenanceOperations)["gatewayMaintenance.recovery"]>[0],
+  assertCurrent: () => void,
+) {
+  return runOpenClawStateWorkerOperation(
+    captureOpenClawStateWorkerContext(),
+    (scope) => scope.execute({ type: "gatewayMaintenance.recovery", input }),
+    { assertCurrent },
+  );
+}
 
 export async function readGatewayMaintenanceState(options: OpenClawStateDatabaseOptions = {}) {
   return parseGatewayMaintenanceState(
