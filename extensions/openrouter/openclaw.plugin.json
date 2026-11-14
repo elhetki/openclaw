@@ -1,5 +1,6 @@
 {
   "id": "openrouter",
+  "gatewayMaintenance": { "policy": "core-coordinator-v1" },
   "categories": ["models"],
   "capabilityCatalogEntry": "./capability-catalog.ts",
   "activation": {

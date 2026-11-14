@@ -106,8 +106,12 @@ plugins, all 155 public SDK exports, declaration budget, UI budgets, and final C
 startup metadata. This validates compilation/assets, not a recovery listener or
 an immutable final package; final packaging must refresh source provenance.
 
-OpenRouter and Nate native manifests do not receive consent merely because this
-contract exists. Each requires its own explicit reviewed declaration. Nate must
+The bundled OpenRouter manifest now explicitly consents in a separate reviewed
+change. Its actual registration test confirms no competing access policy, and the
+normal-loader conflict regression covers both ordinary and OpenRouter IDs.
+The focused suites passed 59 tests on Node 26.1.0 (43.22 s); independent review
+found no P0–P2 defects. Nate native still requires its own reviewed declaration.
+Nate must
 also retain a separate root-held coordinator credential; the Home/broker admin
 credential is not maintenance authority. No TEST activation is qualified.
 

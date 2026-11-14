@@ -167,26 +167,29 @@ it("rejects conflicting normal access-policy registration while preserving undec
   }
 });
 
-it("carries consent through the normal manifest loader before rejecting conflicting code", () => {
-  const owner = fixture(consent);
-  fs.writeFileSync(
-    path.join(owner.pluginRoot, "index.cjs"),
-    `module.exports = { id: "${owner.id}", register(api) { api.registerGatewayAccessPolicy({ authorize() { return undefined; } }); } };`,
-  );
-  const registry = loadPluginRegistryHandle({
-    config: owner.config,
-    env: owner.env,
-    cache: false,
-    runtimeSideEffects: false,
-  });
-  expect(registry.plugins.find((plugin) => plugin.id === owner.id)).toMatchObject({
-    gatewayMaintenance: consent,
-    status: "error",
-    failurePhase: "register",
-    error: expect.stringContaining("conflicts"),
-  });
-  expect(registry.gatewayAccessPolicies).toEqual([]);
-});
+it.each(["maintenance-owner", "openrouter"])(
+  "carries %s consent through the normal manifest loader before rejecting conflicting code",
+  (id) => {
+    const owner = fixture(consent, id);
+    fs.writeFileSync(
+      path.join(owner.pluginRoot, "index.cjs"),
+      `module.exports = { id: "${owner.id}", register(api) { api.registerGatewayAccessPolicy({ authorize() { return undefined; } }); } };`,
+    );
+    const registry = loadPluginRegistryHandle({
+      config: owner.config,
+      env: owner.env,
+      cache: false,
+      runtimeSideEffects: false,
+    });
+    expect(registry.plugins.find((plugin) => plugin.id === owner.id)).toMatchObject({
+      gatewayMaintenance: consent,
+      status: "error",
+      failurePhase: "register",
+      error: expect.stringContaining("conflicts"),
+    });
+    expect(registry.gatewayAccessPolicies).toEqual([]);
+  },
+);
 
 it.each(["memory", "contextEngine"] as const)(
   "refuses unsupported %s slot owners outside the allowlist",

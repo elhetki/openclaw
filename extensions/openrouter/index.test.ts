@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { createAssistantMessageEventStream } from "openclaw/plugin-sdk/llm";
 import {
+  createCapturedPluginRegistration,
   registerProviderPlugin,
   registerSingleProviderPlugin,
   resolveProviderPluginChoice,
@@ -105,6 +106,7 @@ async function captureOpenRouterWrappedPayload(params: {
 }
 
 type OpenRouterManifest = {
+  gatewayMaintenance?: { policy: string };
   modelCatalog?: {
     discovery?: Record<string, string>;
   };
@@ -127,6 +129,19 @@ function readManifest(): OpenRouterManifest {
 }
 
 describe("openrouter provider hooks", () => {
+  it("consents to core coordinator maintenance without registering a competing access policy", () => {
+    expect(readManifest().gatewayMaintenance).toEqual({ policy: "core-coordinator-v1" });
+    const captured = createCapturedPluginRegistration({ id: "openrouter" });
+    const accessPolicy = vi
+      .spyOn(captured.api, "registerGatewayAccessPolicy")
+      .mockImplementation(() => {
+        throw new Error("Maintenance consent forbids a competing access policy");
+      });
+    openrouterPlugin.register(captured.api);
+    expect(accessPolicy).not.toHaveBeenCalled();
+    expect(captured.providers).toHaveLength(1);
+  });
+
   it("declares runtime text catalog discovery", () => {
     expect(readManifest().modelCatalog?.discovery).toEqual({ openrouter: "runtime" });
   });
