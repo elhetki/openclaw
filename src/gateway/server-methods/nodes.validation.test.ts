@@ -22,6 +22,15 @@ describe("node and environment request validation", () => {
     ["node.rename", { nodeId: "node-1", displayName: 1 }],
     ["node.list", { unexpected: true }],
     ["node.describe", { nodeId: 1 }],
+    ["node.admission.describe", { nodeId: "mac" }],
+    [
+      "node.admission.describe",
+      {
+        nodeId: "mac",
+        expectedGatewayDeviceId: "gateway",
+        internal: { authenticatedOperator: true },
+      },
+    ],
     ["node.pluginTools.update", { tools: {} }],
     ["node.skills.update", { skills: {} }],
     ["node.pending.pull", { unexpected: true }],

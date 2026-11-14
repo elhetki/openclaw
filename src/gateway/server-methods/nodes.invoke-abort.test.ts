@@ -141,6 +141,11 @@ describe("node.invoke caller cancellation", () => {
   it.each([
     { deviceId: "different-device", generation: "generation:paired-node:1" },
     { deviceId: "paired-node", generation: "generation:paired-node:old" },
+    {
+      deviceId: "paired-node",
+      generation: "generation:paired-node:1",
+      connectionId: "old-connection",
+    },
   ])(
     "refuses a caller's stale target admission before node dispatch: %j",
     async (expectedPairing) => {
@@ -167,7 +172,11 @@ describe("node.invoke caller cancellation", () => {
     const { invocation, respond } = startNodeInvoke({
       invoke,
       requestParams: {
-        expectedPairing: { deviceId: "paired-node", generation: "generation:paired-node:1" },
+        expectedPairing: {
+          deviceId: "paired-node",
+          generation: "generation:paired-node:1",
+          connectionId: "paired-node-connection",
+        },
       },
     });
     await invocation;
@@ -181,6 +190,59 @@ describe("node.invoke caller cancellation", () => {
     expect(respond).toHaveBeenCalledWith(true, expect.anything(), undefined);
   });
 
+  it("rejects connection replacement while command policy awaits", async () => {
+    const invoke = vi.fn<NodeRegistry["invoke"]>(async () => ({ ok: true, payload: {} }));
+    mocks.applyPluginNodeInvokePolicy.mockImplementationOnce(async () => {
+      session.connId = "replacement-connection";
+      return undefined;
+    });
+    try {
+      const { invocation, respond } = startNodeInvoke({
+        invoke,
+        requestParams: {
+          expectedPairing: {
+            deviceId: "paired-node",
+            generation: "generation:paired-node:1",
+            connectionId: "paired-node-connection",
+          },
+        },
+      });
+      await invocation;
+      expect(invoke).not.toHaveBeenCalled();
+      expect(respond.mock.calls[0]?.[0]).toBe(false);
+    } finally {
+      session.connId = "paired-node-connection";
+    }
+  });
+
+  it("withholds a result when the admitted connection was replaced", async () => {
+    const invoke = vi.fn<NodeRegistry["invoke"]>(async () => {
+      session.connId = "replacement-connection";
+      return { ok: true, payload: { screenshot: "private" } };
+    });
+    try {
+      const { invocation, respond } = startNodeInvoke({
+        invoke,
+        requestParams: {
+          expectedPairing: {
+            deviceId: "paired-node",
+            generation: "generation:paired-node:1",
+            connectionId: "paired-node-connection",
+          },
+        },
+      });
+      await invocation;
+      expect(invoke).toHaveBeenCalledTimes(1);
+      expect(respond).toHaveBeenCalledWith(
+        false,
+        undefined,
+        expect.objectContaining({ details: expect.objectContaining({ code: "PAIRING_CHANGED" }) }),
+      );
+    } finally {
+      session.connId = "paired-node-connection";
+    }
+  });
+
   it("refuses replacement of an admitted pairing while command policy awaits", async () => {
     const invoke = vi.fn<NodeRegistry["invoke"]>(async () => ({ ok: true, payload: {} }));
     mocks.applyPluginNodeInvokePolicy.mockImplementationOnce(async () => {
@@ -191,7 +253,11 @@ describe("node.invoke caller cancellation", () => {
       const { invocation, respond } = startNodeInvoke({
         invoke,
         requestParams: {
-          expectedPairing: { deviceId: "paired-node", generation: "generation:paired-node:1" },
+          expectedPairing: {
+            deviceId: "paired-node",
+            generation: "generation:paired-node:1",
+            connectionId: "paired-node-connection",
+          },
         },
       });
       await invocation;

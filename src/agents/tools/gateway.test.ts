@@ -108,6 +108,18 @@ function releaseAuthorities() {
 }
 
 describe("gateway tool defaults", () => {
+  it("never exposes privileged node admission through the agent tool transport", async () => {
+    await expect(
+      callGatewayTool(
+        "node.admission.describe",
+        {},
+        {
+          nodeId: "mac",
+          expectedGatewayDeviceId: "gateway",
+        },
+      ),
+    ).rejects.toThrow("trusted operator transport");
+  });
   beforeEach(() => {
     releaseAuthorities();
     mocks.callGateway.mockReset().mockResolvedValue({ ok: true });

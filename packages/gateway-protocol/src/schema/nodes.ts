@@ -147,6 +147,12 @@ export const NodePendingAckParamsSchema = closedObject({
 
 export const NodeDescribeParamsSchema = closedObject({ nodeId: NonEmptyString });
 
+/** Trusted operator admission read; never a model tool. */
+export const NodeAdmissionDescribeParamsSchema = closedObject({
+  nodeId: NonEmptyString,
+  expectedGatewayDeviceId: NonEmptyString,
+});
+
 /** Invokes a command on a paired node; idempotency allows safe retries. */
 export const NodeInvokeParamsSchema = closedObject({
   nodeId: NonEmptyString,
@@ -160,6 +166,7 @@ export const NodeInvokeParamsSchema = closedObject({
     closedObject({
       deviceId: NonEmptyString,
       generation: NonEmptyString,
+      connectionId: Type.Optional(NonEmptyString),
     }),
   ),
   // Gateway-only agent ownership metadata. Forwarded beside params, never inside them.

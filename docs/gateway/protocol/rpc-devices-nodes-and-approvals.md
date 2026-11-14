@@ -45,6 +45,24 @@ Outcomes are retained past the credential's own expiry.
 
 - `node.pair.list`, `node.pair.approve`, `node.pair.reject`, and `node.pair.remove` cover node capability approvals. `node.pair.request` and `node.pair.verify` were removed in 2026.7 together with the standalone node pairing store; pending requests are created by the Gateway during node connects.
 - `node.list` and `node.describe` return known/connected node state.
+- `node.admission.describe` is a privileged control-plane read for a live,
+  signed device-token `operator.admin` connection. It accepts exact `nodeId` and
+  `expectedGatewayDeviceId` fingerprints and returns `gatewayDeviceId` plus an
+  `expectedPairing` object containing `deviceId`, `generation`, and `connectionId`.
+  Internal agent, plugin, synthetic, unsigned, and non-admin callers are denied;
+  this RPC is not exposed as an agent tool. The node must remain paired and on
+  the same connection throughout the read. It does not pair or wake a device.
+  Pass the returned object unchanged to `node.invoke`: a replaced pairing or
+  connection fails before dispatch and stale results are withheld. A connection
+  pin disables deferred foreground queuing; an offline node needs fresh admission.
+  Ordinary `node.describe` and invocations without a pin retain their behavior.
+
+  Nate activation requires one human per personal Gateway, an audited inventory
+  of admin credentials, and broker credentials unavailable to agent processes.
+  A second genuine admin credential on that installation is equivalent authority,
+  not a separate tenant. These pins restrict targets; they do not grant task or
+  user authority, which Nate must check independently at dispatch and result.
+
 - `node.rename` updates a paired node label.
 - `node.invoke` forwards a command to a connected node.
 - Callers that admit work against a specific pairing may provide `expectedPairing: { deviceId, generation }` to `node.invoke`. `deviceId` is the canonical authenticated device fingerprint and must match `nodeId`; `generation` is the admitted node pairing generation. A mismatch returns `PAIRING_CHANGED` before wake or dispatch. The Gateway retains that generation and its selected connection through the existing transport checks. Omitting the optional precondition preserves ordinary invocation behavior. The precondition pins a target; it does not grant command permission or establish application task authority.

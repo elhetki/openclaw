@@ -1,3 +1,4 @@
+import { nodeAdmissionHandlers } from "./nodes.admission.js";
 import { nodeEventHandlers } from "./nodes.event.js";
 import { nodeInvokeHandlers } from "./nodes.invoke.js";
 import { nodePairingHandlers } from "./nodes.pairing.js";
@@ -12,6 +13,7 @@ export {
 } from "./nodes.wake.js";
 
 export const nodeHandlers: GatewayRequestHandlers = {
+  ...nodeAdmissionHandlers,
   ...nodePairingHandlers,
   ...nodeReadHandlers,
   ...nodePendingActionHandlers,

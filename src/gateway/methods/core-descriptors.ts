@@ -297,6 +297,7 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ],
   ["node.rename", "nodes", "operator.pairing", "<=2026.7"],
   ["node.list", "nodes", "operator.read", "<=2026.7"],
+  ["node.admission.describe", "nodes", "operator.admin", "2026.11.14"],
   ["node.describe", "nodes", "operator.read", "<=2026.7"],
   ["node.pluginSurface.refresh", "nodes", "node", "<=2026.7"],
   ["node.pluginTools.update", "nodes", "node", "<=2026.7"],

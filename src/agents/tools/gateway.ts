@@ -628,6 +628,9 @@ export async function callGatewayTool<T = Record<string, unknown>>(
     dispatchAuthority?: Parameters<typeof prepareQuestionGatewayDispatch>[0];
   },
 ) {
+  if (method === "node.admission.describe") {
+    throw new Error("Node admission reads require a trusted operator transport, not an agent tool");
+  }
   const dispatchAuthority = extra?.dispatchAuthority;
   if (
     dispatchAuthority &&

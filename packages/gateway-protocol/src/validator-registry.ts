@@ -253,6 +253,7 @@ export const validateSystemInfoResult = compile(S.SystemInfoResultSchema);
 export const validatePresenceQueryParams = compile(S.PresenceQueryParamsSchema);
 export const validatePresenceQueryResult = compile(S.PresenceQueryResultSchema);
 export const validateNodePendingAckParams = compile(S.NodePendingAckParamsSchema);
+export const validateNodeAdmissionDescribeParams = compile(S.NodeAdmissionDescribeParamsSchema);
 export const validateNodeDescribeParams = compile(S.NodeDescribeParamsSchema);
 export const validateNodeInvokeParams = compile(S.NodeInvokeParamsSchema);
 export const validateNodeInvokeResultParams = compile(S.NodeInvokeResultParamsSchema);

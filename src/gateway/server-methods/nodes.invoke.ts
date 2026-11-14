@@ -222,6 +222,16 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
         respondPairingChanged(respond);
         return;
       }
+      const expectedConnectionId = p.expectedPairing?.connectionId;
+      const admittedConnectionCurrent = () =>
+        !expectedConnectionId ||
+        resolveDispatchableNodeSession(
+          context.nodeRegistry.getForPairingGeneration(nodeId, generation.key),
+        )?.connId === expectedConnectionId;
+      if (!admittedConnectionCurrent()) {
+        respondPairingChanged(respond);
+        return;
+      }
       const wakeLifecycle = captureNodeWakeLifecycle(nodeId, generation.key);
       // Wake helpers identify their owner by the original signal. Compose the
       // caller only for dispatched node work; never replace that owner signal.
@@ -236,7 +246,7 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
             respondIfInvokeExpired();
             return false;
           }
-          if (pairingCurrent) {
+          if (pairingCurrent && admittedConnectionCurrent()) {
             return true;
           }
           respondPairingChanged(respond);
@@ -572,6 +582,7 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
             // Pending actions outlive this RPC. Closure-bound agent or approval
             // authority cannot be transferred to a later device pull.
             !client?.internal?.agentRuntimeIdentity &&
+            !expectedConnectionId &&
             !forwardedParams.approvalAuthority
           ) {
             // Foreground-only iOS commands become pullable pending actions instead
