@@ -366,6 +366,7 @@ export function buildPluginManifestRecord(params: {
     id: pluginId,
     categories: params.manifest.categories,
     backupResources: params.manifest.backupResources,
+    gatewayMaintenance: params.manifest.gatewayMaintenance,
     doctorContract: params.manifest.doctorContract,
     doctorHealthChecks: params.manifest.doctorHealthChecks,
     sessionRouteStateOwners: params.manifest.sessionRouteStateOwners,

@@ -9,6 +9,7 @@ import type { JsonSchemaObject } from "../shared/json-schema.types.js";
 import type { DoctorSessionRouteStateOwner } from "./doctor-session-route-state-owner-types.js";
 import type { PluginManifestCommandAlias } from "./manifest-command-aliases.js";
 import type { PLUGIN_MANIFEST_CONTRACT_KEYS } from "./manifest-contract-keys.js";
+import type { PluginGatewayMaintenance } from "./manifest-gateway-maintenance.js";
 import type { PluginKind } from "./plugin-kind.types.js";
 
 /** UI hint metadata for plugin config schema fields. */
@@ -430,6 +431,8 @@ export type PluginManifest = {
   categories?: PluginCategorySlug[];
   /** Static backup inclusion/exclusion declarations; resolved without loading plugin runtime. */
   backupResources?: PluginManifestBackupResource[];
+  /** Explicit consent to a separate, core-owned coordinator-only recovery context. */
+  gatewayMaintenance?: PluginGatewayMaintenance;
   /** Plugin ids that must also be installed for this plugin to have effect. */
   requiresPlugins?: string[];
   enabledByDefault?: boolean;

@@ -306,6 +306,7 @@ type PluginConversationBindingResolvedHandlerRegistration = PluginRegistrationOw
 
 export type PluginRecord = {
   id: string;
+  gatewayMaintenance?: PluginManifestRecord["gatewayMaintenance"];
   nativeSessionCatalog?: PluginManifestNativeSessionCatalogSetup;
   name: string;
   packageVersion?: string;

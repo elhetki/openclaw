@@ -328,6 +328,11 @@ export function createOperationRegistrars(state: PluginRegistryState) {
   };
 
   const registerGatewayAccessPolicy = (record: PluginRecord, policy: PluginGatewayAccessPolicy) => {
+    if (record.gatewayMaintenance) {
+      throw new Error(
+        "gatewayMaintenance core-coordinator-v1 conflicts with Gateway access policy registration",
+      );
+    }
     if (typeof policy.authorize !== "function") {
       reportRegistrationError(record, "Gateway access policy requires an authorize handler");
       return;

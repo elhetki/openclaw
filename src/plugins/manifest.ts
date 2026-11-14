@@ -12,6 +12,7 @@ import { coerceDoctorSessionRouteStateOwners } from "./doctor-session-route-stat
 import * as capabilityNormalizers from "./manifest-capability-normalizers.js";
 import { normalizeManifestCommandAliases } from "./manifest-command-aliases.js";
 import { normalizeConfigGroups } from "./manifest-config-groups.js";
+import { parsePluginGatewayMaintenance } from "./manifest-gateway-maintenance.js";
 import * as modelProviderNormalizers from "./manifest-model-provider-normalizers.js";
 import { normalizeManifestPlatforms } from "./manifest-platforms.js";
 import * as setupNormalizers from "./manifest-setup-normalizers.js";
@@ -200,6 +201,12 @@ export function loadPluginManifest(
   if (!configSchema) {
     return fail("plugin manifest requires configSchema");
   }
+  let gatewayMaintenance;
+  try {
+    gatewayMaintenance = parsePluginGatewayMaintenance(raw.gatewayMaintenance);
+  } catch (error) {
+    return fail(`invalid plugin manifest: ${String(error)}`);
+  }
   const backupResources = parseManifestBackupResources(raw.backupResources);
   if (!backupResources.ok) {
     return cacheResult({
@@ -240,6 +247,7 @@ export function loadPluginManifest(
   const manifestBeforeDashboard = {
     id,
     configSchema,
+    ...(gatewayMaintenance ? { gatewayMaintenance } : {}),
     ...("categories" in categories ? { categories: categories.categories } : {}),
     ...(backupResources.resources !== undefined
       ? { backupResources: backupResources.resources }

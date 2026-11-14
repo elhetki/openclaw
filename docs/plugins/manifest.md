@@ -41,6 +41,46 @@ See [Plugins](/tools/plugin) for the full plugin system guide, and [Capability m
 
 **Do not use it for:** registering native runtime hooks, declaring the full plugin runtime entrypoint, or npm install metadata. Those belong in your plugin code and `package.json`.
 
+## Coordinator-only maintenance consent
+
+The experimental persistent Gateway maintenance prototype recognizes this optional
+manifest declaration:
+
+```json
+{
+  "gatewayMaintenance": { "policy": "core-coordinator-v1" }
+}
+```
+
+This is explicit consent to a **separate core-owned recovery control context**.
+It does not grant ordinary operator, plugin, HTTP, tool, or session access. The
+versioned policy permits only `gateway.maintenance.status`,
+`gateway.maintenance.recover`, `gateway.maintenance.enroll`, and
+`gateway.maintenance.release`, when each method is implemented and qualified.
+The core must authenticate the exact persisted coordinator device key and token
+generation, enforce the bound agent/session and maintenance generation, and
+revalidate current authority at commit. `sessions.create` is never exempted.
+
+Recovery reads this declaration from verified manifest metadata before loading
+plugin JavaScript. Missing, malformed, unknown-version, incomplete, or conflicting
+policy fails closed. Every available plugin owner in every configured workspace
+must consent; a missing declaration never means unrestricted recovery. Configured
+operator role policies remain unsupported and block recovery. The initial context
+also requires `plugins.slots.memory: "none"` and no custom context-engine slot.
+This refuses memory-owned dreaming sidecars and other slot-specific authorization
+until their recovery adapters are qualified.
+
+A consenting plugin must not call `registerGatewayAccessPolicy`: normal runtime
+registration throws on that conflict. Plugins requiring their own access-policy
+callbacks must omit this declaration and remain unavailable for this recovery
+mode. Ordinary plugin methods, tool policies, and services are not loaded into
+or invoked by the recovery context. `PluginGatewayMaintenance` is exported from
+`openclaw/plugin-sdk/core` for manifest tooling.
+
+This declaration alone does not enable a listener or qualify restart, drain,
+enrollment, or host filesystem custody. The current prototype still refuses
+ordinary startup under an unresolved maintenance generation.
+
 ## Where each field is documented
 
 Every manifest field is documented on this page or on one of the seven child pages below.

@@ -38,6 +38,7 @@ import {
 } from "../sessions/session-key-utils.js";
 import { createAttachedChannelResultAdapter } from "./channel-send-result.js";
 import { createCachedLazyValueGetter } from "./lazy-value.js";
+export type { PluginGatewayMaintenance } from "../plugins/manifest-gateway-maintenance.js";
 export type {
   AgentPromptGuidance,
   AgentPromptGuidanceEntry,
