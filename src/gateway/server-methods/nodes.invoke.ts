@@ -15,6 +15,12 @@ import {
 import { awaitWithinDeadline, ABSOLUTE_DEADLINE_EXPIRED } from "../../utils/absolute-deadline.js";
 import { isForbiddenBrowserProxyMutation } from "../node-browser-proxy-policy.js";
 import { isNodeCommandAllowed, resolveNodeCommandAllowlist } from "../node-command-policy.js";
+import {
+  checkExternalNodeAuthority,
+  isExternalNodeAuthorityCurrent,
+  respondExternalNodeAuthorityClosed,
+  prepareExternalNodeInvokeAuthority,
+} from "../node-invoke-external-authority.js";
 import { applyPluginNodeInvokePolicy } from "../node-invoke-plugin-policy.js";
 import { invokeNodeWithReadinessRetry } from "../node-invoke-readiness.js";
 import { sanitizeNodeInvokeParamsForForwarding } from "../node-invoke-sanitize.js";
@@ -402,6 +408,38 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
         if (respondIfInvokeExpired()) {
           return;
         }
+        // Capture authority from the Gateway owner, never from model/wire metadata.
+        const { authority: externalAuthority, params: protectedParams } =
+          prepareExternalNodeInvokeAuthority(context.externalNodeInvokeAuthority, {
+            client,
+            nodeId,
+            command,
+            params: forwardedParams.params,
+            idempotencyKey: p.idempotencyKey,
+            pairing: {
+              deviceId: nodeId,
+              generation: generation.key,
+              connectionId: nodeSession.connId,
+            },
+          });
+        if (externalAuthority && (!p.expectedPairing?.connectionId || nodeInvokeStream)) {
+          // Streaming needs a separate check per chunk; do not leak partial results.
+          respondExternalNodeAuthorityClosed(respond, nodeCommandDispatched);
+          return;
+        }
+        const authorizeExternalResult = async () => {
+          if (!externalAuthority) {
+            return true;
+          }
+          const allowed = await withinInvokeDeadline(() =>
+            checkExternalNodeAuthority(externalAuthority, "result"),
+          );
+          if (allowed !== true) {
+            respondExternalNodeAuthorityClosed(respond, nodeCommandDispatched);
+            return false;
+          }
+          return continuePairingWork();
+        };
         if (forwardedParams.approvalAuthority) {
           const authority = forwardedParams.approvalAuthority;
           releaseApprovalHandoff =
@@ -440,7 +478,8 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
             client,
             nodeSession,
             command,
-            params: forwardedParams.params,
+            params: protectedParams,
+            ...(externalAuthority ? { externalAuthority } : {}),
             ...(sessionKey ? { sessionKey } : {}),
             turnSource: {
               channel: p.turnSourceChannel,
@@ -476,6 +515,9 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
           return;
         }
         if (policyResult) {
+          if (!(await authorizeExternalResult())) {
+            return;
+          }
           // Plugin policies can satisfy an invocation without crossing the raw
           // node command channel; still emit mirrored Talk events for UI state.
           if (!policyResult.ok) {
@@ -549,7 +591,10 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
           expectedConnId: nodeSession.connId,
           expectedPairingGeneration: generation.key,
           command,
-          params: forwardedParams.params,
+          params: protectedParams,
+          ...(externalAuthority
+            ? { authorizeDispatch: () => checkExternalNodeAuthority(externalAuthority, "dispatch") }
+            : {}),
           turnSource,
           timeoutMs: dispatchTimeoutMs,
           deadlineAtMs: invokeDeadlineAtMs,
@@ -562,6 +607,7 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
           }),
           isDispatchAuthorized: () =>
             isUploadAllowed() &&
+            (!externalAuthority || isExternalNodeAuthorityCurrent(externalAuthority)) &&
             (nodeInvokeStream?.isRuntimeCurrent() ?? true) &&
             runtimeAuthorityError() === undefined,
           onDispatchReady: (invokeId) => {
@@ -570,6 +616,9 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
           },
         });
         if (!(await continuePairingWork())) {
+          return;
+        }
+        if (!(await authorizeExternalResult())) {
           return;
         }
         if (!res.ok) {
@@ -583,6 +632,7 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
             // authority cannot be transferred to a later device pull.
             !client?.internal?.agentRuntimeIdentity &&
             !expectedConnectionId &&
+            !externalAuthority &&
             !forwardedParams.approvalAuthority
           ) {
             // Foreground-only iOS commands become pullable pending actions instead

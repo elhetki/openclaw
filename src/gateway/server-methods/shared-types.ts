@@ -313,6 +313,8 @@ type GatewayKernelContext = {
     previousConfig: OpenClawConfig,
   ) => void;
   nodeRegistry: NodeRegistry;
+  /** Trusted host-only authority; no RPC/config/model claims can install it. */
+  externalNodeInvokeAuthority?: import("../node-invoke-external-authority.js").ExternalNodeInvokeAuthorityProvider;
   agentRunSeq: Map<string, number>;
   chatAbortControllers: Map<string, ChatAbortControllerEntry>;
   /** Cancel identities for turns waiting in the followup/collect queue. */

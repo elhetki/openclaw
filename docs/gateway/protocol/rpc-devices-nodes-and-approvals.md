@@ -126,3 +126,28 @@ exec policy, standing-grant, or execution-authorization semantics.
 - `cron.run` enqueues a manual run and acknowledges with `{ ok: true, enqueued: true, runId }`. Pass `waitTimeoutMs` to hold the response until that run records its outcome: the acknowledgement then also carries `run`, the same entry `cron.runs` returns for that `runId`, or `finished: true` when the run ended but its history is not visible to the caller. If the wait ends first, neither is set and the run continues. Agent-runtime callers get the plain acknowledgement immediately for main-session jobs and jobs that run in their own session, because those runs start only after the calling turn.
 - `cron.runs` accepts an optional non-empty `runId` filter so clients can follow one queued manual run without racing against other history entries for the same job.
 - Skills and tools: `commands.list`, `skills.*`, `tools.catalog`, `tools.effective`, `tools.invoke`. See [Operator helper methods](/gateway/protocol/operator-methods#operator-helper-methods).
+
+## Host-owned external node authority
+
+A Gateway host can install `externalNodeInvokeAuthority` on its request context.
+This source-only hook is not an RPC field, model tool, plugin policy argument, or
+configuration claim. Its provider identifies protected requests from authenticated
+Gateway state and captures the current task, principal/session/role, exact command,
+immutable payload, and pairing/connection binding in a closure. It must throw when
+that protected binding is missing; `undefined` is reserved for ordinary callers.
+No provider bootstrap or broker credentials are supplied by this protocol change.
+
+For protected calls, a fresh `authorize("dispatch")` check runs at the registry's
+existing final transport seam on every readiness retry. Local `isCurrent()` runs
+again after the awaited broker check. `authorize("result")` runs before releasing
+results, including to a plugin policy. Exceptions and false decisions deny; the
+provider must bound its network calls and publish local revocation through
+`isCurrent()`. RPC deadlines still apply. A remote check cannot retroactively undo
+an already dispatched action; retain dispatch provenance when reporting a failure.
+
+Protected calls require an admitted connection pin. Until they have their own
+per-effect authority contract, progress streaming, private plugin transports,
+plugin payload/workspace/idempotency overrides, and deferred foreground delivery
+are denied. Ordinary calls without an external binding keep existing behavior.
+Nate activation must prove its host provider is installed and that disabling or
+losing the broker cannot make protected calls fall through to ordinary dispatch.

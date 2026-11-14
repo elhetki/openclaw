@@ -80,6 +80,7 @@ function startNodeInvoke(options: {
   client?: GatewayRequestHandlerOptions["client"];
   requestParams?: Record<string, unknown>;
   validateAgentRuntimeApprovalAuthority?: () => boolean;
+  externalNodeInvokeAuthority?: GatewayRequestHandlerOptions["context"]["externalNodeInvokeAuthority"];
 }) {
   const respond = vi.fn();
   const handler = nodeInvokeHandlers["node.invoke"];
@@ -110,6 +111,7 @@ function startNodeInvoke(options: {
       },
       getRuntimeConfig: () => options.config ?? {},
       validateAgentRuntimeApprovalAuthority: options.validateAgentRuntimeApprovalAuthority,
+      externalNodeInvokeAuthority: options.externalNodeInvokeAuthority,
       logGateway: { info: vi.fn(), warn: vi.fn() },
     } as unknown as GatewayRequestHandlerOptions["context"],
     ...(options.signal ? { signal: options.signal } : {}),
@@ -136,6 +138,82 @@ function createNodeInvokeStreamClient(
     },
   };
 }
+
+describe("host external node authority", () => {
+  it.each(["allowed", "dispatch-denied", "broker-offline", "revoked", "result-denied", "retry"])(
+    "checks every effect and result (%s)",
+    async (outcome) => {
+      let live = true;
+      let sent = 0;
+      const authorize = vi.fn(async (phase: "dispatch" | "result") => {
+        if (outcome === "broker-offline") {
+          throw new Error("private broker failure");
+        }
+        if (outcome === "revoked" && phase === "dispatch") {
+          live = false;
+        }
+        return (
+          !(phase === "dispatch" && outcome === "dispatch-denied") &&
+          !(phase === "result" && outcome === "result-denied")
+        );
+      });
+      const invoke = vi.fn<NodeRegistry["invoke"]>(async (request) => {
+        if (!(await request.authorizeDispatch?.()) || !request.isDispatchAuthorized?.()) {
+          return { ok: false, error: { code: "APPROVAL_AUTHORITY_CLOSED" } };
+        }
+        sent += 1;
+        if (outcome === "retry" && sent === 1) {
+          return { ok: false, error: { code: "NODE_NOT_READY" } };
+        }
+        return { ok: true, payload: { screenshot: "private" } };
+      });
+      const { invocation, respond } = startNodeInvoke({
+        invoke,
+        externalNodeInvokeAuthority: () => ({ authorize, isCurrent: () => live }),
+        requestParams: {
+          expectedPairing: {
+            deviceId: "paired-node",
+            generation: "generation:paired-node:1",
+            connectionId: "paired-node-connection",
+          },
+        },
+      });
+      await invocation;
+      expect(respond.mock.calls.at(-1)?.[0]).toBe(outcome === "allowed" || outcome === "retry");
+      if (["dispatch-denied", "broker-offline", "revoked"].includes(outcome)) {
+        expect(sent).toBe(0);
+      }
+      if (outcome === "retry") {
+        expect(authorize.mock.calls.filter(([phase]) => phase === "dispatch")).toHaveLength(2);
+      }
+      if (outcome === "result-denied") {
+        expect(JSON.stringify(respond.mock.calls)).not.toContain("screenshot");
+      }
+    },
+  );
+
+  it("rejects streaming before policy or transport", async () => {
+    const invoke = vi.fn();
+    const { invocation, respond } = startNodeInvoke({
+      invoke,
+      externalNodeInvokeAuthority: () => ({ authorize: async () => true, isCurrent: () => true }),
+      client: {
+        internal: { syntheticClient: true, pluginRuntimeOwnerId: "test", nodeInvokeStream: {} },
+      } as GatewayRequestHandlerOptions["client"],
+      requestParams: {
+        expectedPairing: {
+          deviceId: "paired-node",
+          generation: "generation:paired-node:1",
+          connectionId: "paired-node-connection",
+        },
+      },
+    });
+    await invocation;
+    expect(invoke).not.toHaveBeenCalled();
+    expect(mocks.applyPluginNodeInvokePolicy).not.toHaveBeenCalled();
+    expect(respond.mock.calls.at(-1)?.[0]).toBe(false);
+  });
+});
 
 describe("node.invoke caller cancellation", () => {
   it.each([

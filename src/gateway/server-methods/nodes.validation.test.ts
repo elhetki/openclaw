@@ -59,6 +59,15 @@ describe("node and environment request validation", () => {
         expectedPairing: { deviceId: "node-1", generation: "generation-1", fallback: true },
       },
     ],
+    [
+      "node.invoke",
+      {
+        nodeId: "node-1",
+        command: "screen.snapshot",
+        idempotencyKey: "request-1",
+        externalAuthority: { authorized: true },
+      },
+    ],
     ["node.invoke.result", { id: "invoke-1", nodeId: "node-1", ok: "yes" }],
     ["node.invoke.progress", { invokeId: "invoke-1", nodeId: "node-1", seq: -1, chunk: "" }],
     ["node.event", { event: 1 }],

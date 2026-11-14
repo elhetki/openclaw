@@ -20,6 +20,11 @@ import type { AgentRuntimeIdentity } from "./agent-runtime-identity-token.js";
 import { ApprovalObserverClosedError } from "./exec-approval-lifecycle.js";
 import { isNodeCommandAllowed, resolveNodeCommandAllowlist } from "./node-command-policy.js";
 import {
+  checkExternalNodeAuthority,
+  isExternalNodeAuthorityCurrent,
+  type ExternalNodeInvokeAuthority,
+} from "./node-invoke-external-authority.js";
+import {
   consumeNodeInvokePlacementGrant,
   prepareNodeInvokePlacementGrant,
   type NodeInvokePlacementGrantAuthorization,
@@ -117,6 +122,8 @@ export async function applyPluginNodeInvokePolicy(params: {
   isInvocationCurrent?: () => boolean | Promise<boolean>;
   isApprovalAuthorityActive?: () => boolean;
   privateTransport?: PluginNodeInvokePrivateTransport;
+  /** Gateway-owned authority, never passed through the public plugin policy context. */
+  externalAuthority?: ExternalNodeInvokeAuthority;
   /** Internal callers carry an admitted run without inventing a client connection. */
   agentRuntimeIdentity?: AgentRuntimeIdentity;
 }): Promise<OpenClawPluginNodeInvokePolicyResult | null> {
@@ -255,6 +262,19 @@ export async function applyPluginNodeInvokePolicy(params: {
       });
       return { ok: false, ...error };
     };
+    if (
+      params.externalAuthority &&
+      (params.privateTransport ||
+        params.nodeInvokeStream ||
+        override.params !== undefined ||
+        override.idempotencyKey !== undefined ||
+        override.workspace !== undefined)
+    ) {
+      return deny("external_authority_binding_changed", {
+        code: "EXTERNAL_AUTHORITY_CLOSED",
+        message: "external authority requires the exact admitted transport and payload",
+      });
+    }
     sessionAuthority?.assertCurrent();
     if (!isCallerRuntimeAuthorityActive()) {
       return deny("node_runtime_authority_closed", {
@@ -392,13 +412,23 @@ export async function applyPluginNodeInvokePolicy(params: {
         onProgress: params.nodeInvokeStream.onProgress,
         idleTimeoutMs: params.nodeInvokeStream.idleTimeoutMs,
       }),
-      ...(standingGrantAuthorization.binding
+      ...(standingGrantAuthorization.binding || params.externalAuthority
         ? {
-            authorizeDispatch: () =>
-              prepareNodeInvokePlacementGrant({
-                runtime: params.context.placementStandingGrants,
-                authorization: standingGrantAuthorization,
-              }),
+            authorizeDispatch: async () => {
+              if (
+                standingGrantAuthorization.binding &&
+                !(await prepareNodeInvokePlacementGrant({
+                  runtime: params.context.placementStandingGrants,
+                  authorization: standingGrantAuthorization,
+                }))
+              ) {
+                return false;
+              }
+              return (
+                !params.externalAuthority ||
+                checkExternalNodeAuthority(params.externalAuthority, "dispatch")
+              );
+            },
           }
         : {}),
       isDispatchAuthorized: () => {
@@ -409,6 +439,7 @@ export async function applyPluginNodeInvokePolicy(params: {
         }
         const current =
           isPluginCurrent() &&
+          (!params.externalAuthority || isExternalNodeAuthorityCurrent(params.externalAuthority)) &&
           params.privateTransport?.isCurrent() !== false &&
           (params.nodeInvokeStream?.isRuntimeCurrent() ?? true) &&
           isCallerRuntimeAuthorityActive() &&
@@ -449,6 +480,30 @@ export async function applyPluginNodeInvokePolicy(params: {
           ...request,
           deadlineAtMs,
         });
+    if (
+      params.externalAuthority &&
+      !(await checkExternalNodeAuthority(params.externalAuthority, "result"))
+    ) {
+      return deny("external_authority_result_closed", {
+        code: "EXTERNAL_AUTHORITY_CLOSED",
+        message: "external authority closed before result release",
+      });
+    }
+    if (params.externalAuthority) {
+      const resultNode = params.context.nodeRegistry.get(params.nodeSession.nodeId);
+      if (
+        !resultNode ||
+        resultNode.client.invalidated ||
+        resultNode.connId !== params.nodeSession.connId ||
+        resultNode.pairingGeneration !== params.nodeSession.pairingGeneration ||
+        !isExternalNodeAuthorityCurrent(params.externalAuthority)
+      ) {
+        return deny("external_authority_result_route_changed", {
+          code: "EXTERNAL_AUTHORITY_CLOSED",
+          message: "external authority target changed before result release",
+        });
+      }
+    }
     if (!res.ok) {
       if (nodeCommandDispatched) {
         recordNodeDecision({
@@ -570,6 +625,7 @@ export async function applyPluginNodeInvokePolicy(params: {
         turnSource: trustedTurnSource,
         isCurrent: () =>
           isPluginCurrent() &&
+          (!params.externalAuthority || isExternalNodeAuthorityCurrent(params.externalAuthority)) &&
           isCallerRuntimeAuthorityActive() &&
           params.privateTransport?.isCurrent() !== false &&
           params.isApprovalAuthorityActive?.() !== false,
