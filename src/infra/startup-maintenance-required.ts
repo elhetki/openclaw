@@ -3,6 +3,7 @@ import { collectNestedErrorCandidates } from "./error-graph-internal.js";
 export const GATEWAY_STARTUP_MAINTENANCE_REQUIRED_REASON = "gateway.maintenance_required";
 
 const maintenanceReasons = {
+  "coordinator-maintenance": "explicit coordinator maintenance reconciliation",
   "state-migrations": "state migration",
   "newer-schema": "a newer OpenClaw build",
   "agent-media": "offline media migration",

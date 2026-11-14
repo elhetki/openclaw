@@ -28,10 +28,12 @@ import {
 import { isTruthyEnvValue, isVitestRuntimeEnv, logAcceptedEnvOption } from "../infra/env.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { createGatewayActiveWorkSnapshot } from "../infra/gateway-active-work.js";
+import { readGatewayMaintenanceState } from "../infra/gateway-maintenance-store.js";
 import { prepareGatewayAgentCliShim } from "../infra/openclaw-cli-shim.js";
 import { readGatewayRestartHandoff } from "../infra/restart-handoff.js";
 import { setGatewayRestartPolicy, setPreRestartDeferralCheck } from "../infra/restart.js";
 import { withSqliteReadOnlyWorkerScope } from "../infra/sqlite-readonly-worker.js";
+import { StartupMaintenanceRequiredError } from "../infra/startup-maintenance-required.js";
 import { withSystemEventOwner } from "../infra/system-event-ownership.js";
 import { enqueueSystemEvent } from "../infra/system-events.js";
 import { applyLoggingConfig } from "../logging/logger.js";
@@ -174,6 +176,26 @@ export async function prepareGatewayServerBootstrap(input: {
         reason: database.reason,
         docsUrl: OPENCLAW_DATABASE_SCHEMA_DOCS_URL,
       });
+    }
+    // Until a control-only recovery runtime is qualified, restart must not run
+    // migrations, plugins, channels or schedulers under an active maintenance
+    // generation. A malformed/unreadable marker also rejects this awaited boot.
+    const maintenance = await startupTrace.measure("state.maintenance", async () => {
+      try {
+        return await withArtifactPreservingStateReads(() => readGatewayMaintenanceState());
+      } catch (cause) {
+        throw new StartupMaintenanceRequiredError(
+          "coordinator-maintenance",
+          "Gateway maintenance state could not be verified; explicit reconciliation is required",
+          { cause },
+        );
+      }
+    });
+    if (maintenance && maintenance.phase !== "released") {
+      throw new StartupMaintenanceRequiredError(
+        "coordinator-maintenance",
+        `Gateway maintenance generation ${maintenance.generation} requires explicit reconciliation before startup`,
+      );
     }
   });
   const { ensureGlobalUndiciEnvProxyDispatcher } = await startupTrace.measure(

@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it, vi } from "vitest";
 import { handleGatewayStartupMaintenance } from "../cli/gateway-cli/startup-maintenance.js";
+import { StartupMaintenanceRequiredError } from "../infra/startup-maintenance-required.js";
 import { setConsoleSubsystemFilter } from "../logging/console.js";
 import { resetLogger, setLoggerOverride } from "../logging/logger.js";
 import { loggingState } from "../logging/state.js";
@@ -26,6 +27,24 @@ afterEach(() => {
   setLoggerOverride(null);
   loggingState.rawConsole = null;
   resetLogger();
+});
+
+it("parks coordinator maintenance without advising doctor to clear the held generation", async () => {
+  const exited = new Error("test exit");
+  const exit = vi.spyOn(defaultRuntime, "exit").mockImplementation(() => {
+    throw exited;
+  });
+  const runtimeError = vi.spyOn(defaultRuntime, "error").mockImplementation(() => {});
+  const refusal = new StartupMaintenanceRequiredError(
+    "coordinator-maintenance",
+    "Gateway maintenance generation 1 requires explicit reconciliation before startup",
+  );
+  await expect(handleGatewayStartupMaintenance(refusal)).rejects.toBe(exited);
+  expect(park).toHaveBeenCalledOnce();
+  expect(exit).toHaveBeenCalledWith(78);
+  const output = runtimeError.mock.calls.flat().join("\n");
+  expect(output).toContain("Keep the maintenance marker intact");
+  expect(output).not.toContain("doctor --fix");
 });
 
 it.each([

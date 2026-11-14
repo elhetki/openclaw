@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { prepareGatewayServerBootstrap } from "../gateway/server-startup-bootstrap.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
+import { writeConfigMachineStateAsync } from "../state/config-machine-state-async.js";
 import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
+import { gatewayMaintenanceStateKey } from "./gateway-maintenance-state.js";
 import {
   readGatewayMaintenanceState,
   writeGatewayMaintenanceTransition,
@@ -45,6 +49,25 @@ await withOpenClawTestState({ label: "gateway-maintenance" }, async (state) => {
     assert.equal((await readGatewayMaintenanceState(options))?.phase, "draining");
     await closeStateDatabaseForTest();
     assert.deepEqual(await readGatewayMaintenanceState(options), persisted);
+    const logger = createSubsystemLogger("maintenance-test");
+    const boot = () =>
+      prepareGatewayServerBootstrap({
+        port: 0,
+        opts: {},
+        log: logger,
+        logSecrets: logger,
+        loadWorkerEnvironmentStartupModule: async () => {
+          throw new Error("maintenance must fence worker startup");
+        },
+        formatRuntimeGatewayAuthTokenWarning: () => "fixture",
+      });
+    await assert.rejects(
+      boot(),
+      /Gateway maintenance generation 1 requires explicit reconciliation before startup/,
+    );
+    await writeConfigMachineStateAsync(gatewayMaintenanceStateKey, { version: 2 }, options);
+    await closeStateDatabaseForTest();
+    await assert.rejects(boot(), /Gateway maintenance state could not be verified/);
   } finally {
     await closeStateDatabaseForTest();
   }
