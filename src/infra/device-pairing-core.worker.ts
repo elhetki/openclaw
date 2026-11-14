@@ -7,8 +7,13 @@ import {
   redeemDevicePairingJoinCodeInWorker,
 } from "./device-pairing-join-code.worker.js";
 import * as tokens from "./device-pairing-tokens.kernel.js";
+import { bootstrapGatewayMaintenanceInWorker } from "./gateway-maintenance-bootstrap.kernel.js";
 
 export const devicePairingOperations = {
+  "devicePairing.bootstrapMaintenance": devicePairingMutation(
+    (input: Parameters<typeof bootstrapGatewayMaintenanceInWorker>[0], { database }) =>
+      bootstrapGatewayMaintenanceInWorker(input, database),
+  ),
   "devicePairing.registerJoinCode": devicePairingMutation(
     (input: Parameters<typeof registerDevicePairingJoinCodeInWorker>[1], { database }) =>
       registerDevicePairingJoinCodeInWorker(database.db, input),

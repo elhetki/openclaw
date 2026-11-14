@@ -189,6 +189,15 @@ describe("gateway register option collisions", () => {
     expect(defaultRuntime.exit).toHaveBeenCalledWith(1);
   });
 
+  it("keeps offline maintenance bootstrap unavailable without its explicit stdin option", async () => {
+    await sharedProgram.parseAsync(["gateway", "maintenance-bootstrap"], { from: "user" });
+    expect(defaultRuntime.error).toHaveBeenCalledWith(
+      expect.stringContaining("Pass --request-stdin"),
+    );
+    expect(defaultRuntime.exit).toHaveBeenCalledWith(1);
+    expect(defaultRuntime.writeJson).not.toHaveBeenCalled();
+  });
+
   it("routes an explicitly confirmed token reveal through the output runtime", async () => {
     await sharedProgram.parseAsync(["gateway", "auth-token", "--show"], { from: "user" });
 

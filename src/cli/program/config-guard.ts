@@ -145,6 +145,11 @@ export async function ensureConfigReady(params: {
           : {}),
       });
     try {
+      if (prepareGatewayState) {
+        const { assertOrdinaryGatewayMaintenanceReleased } =
+          await import("../../gateway/maintenance-startup.js");
+        await assertOrdinaryGatewayMaintenanceReleased();
+      }
       preflightResult = !params.suppressDoctorStdout
         ? await runStartupConfigPreflight()
         : await withSuppressedNotes(runStartupConfigPreflight);

@@ -60,9 +60,14 @@ await withOpenClawTestState({ label: "gateway-maintenance-recovery" }, async () 
       binding,
     });
     await closeStateDatabaseForTest();
-    const input = { generation: original.generation, binding };
+    const input = {
+      generation: original.generation,
+      binding,
+      token: device!.tokens!.operator!.token,
+    };
     assert.deepEqual(await operateGatewayMaintenanceRecovery(input, assertCurrent), original);
     for (const changed of [
+      { token: "wrong-coordinator-token" },
       { generation: 2 },
       { binding: { ...binding, deviceId: "c".repeat(64) } },
       { binding: { ...binding, publicKey: "c".repeat(43) } },
@@ -224,7 +229,7 @@ await withOpenClawTestState({ label: "gateway-maintenance-recovery" }, async () 
       ownerInstanceId,
       binding: issuedBinding,
     });
-    const issuedInput = { generation: 4, binding: issuedBinding };
+    const issuedInput = { generation: 4, binding: issuedBinding, token: issued.token };
     await assert.rejects(
       operateGatewayMaintenanceRecovery(issuedInput, assertCurrent),
       /authority changed/,

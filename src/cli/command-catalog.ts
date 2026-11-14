@@ -179,6 +179,28 @@ export const cliCommandCatalog: readonly CliCommandCatalogEntry[] = [
     },
   },
   {
+    commandPath: ["gateway", "maintenance-bootstrap"],
+    exact: true,
+    // This explicit offline owner validates config only after taking its state lock.
+    policy: {
+      configGuard: "skip",
+      loadPlugins: "never",
+      networkProxy: "bypass",
+      ensureCliPath: false,
+      ownsProtocolStdout: true,
+    },
+  },
+  {
+    commandPath: ["gateway", "maintenance-run"],
+    exact: true,
+    policy: {
+      configGuard: "skip",
+      loadPlugins: "never",
+      networkProxy: "bypass",
+      ensureCliPath: false,
+    },
+  },
+  {
     commandPath: ["gateway", "status"],
     exact: true,
     policy: {

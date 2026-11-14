@@ -10,12 +10,14 @@ import {
   type GatewayMaintenanceBinding,
   type GatewayMaintenanceCommand,
 } from "./gateway-maintenance-state.js";
+import { verifyPairingToken } from "./pairing-token.js";
 
 export const gatewayMaintenanceOperations = {
   "gatewayMaintenance.recovery": (
     input: {
       generation: number;
       binding: GatewayMaintenanceBinding;
+      token: string;
       sharedAuthGeneration?: string;
       command?:
         | Extract<GatewayMaintenanceCommand, { action: "recover" }>
@@ -41,6 +43,7 @@ export const gatewayMaintenanceOperations = {
           state.binding.agentId !== binding.agentId ||
           state.binding.sessionKey !== binding.sessionKey ||
           device?.publicKey !== binding.publicKey ||
+          !verifyPairingToken(input.token, device.tokens?.operator?.token ?? "") ||
           !isPairedDeviceTokenIdentityCurrent(
             device,
             "operator",

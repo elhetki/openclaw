@@ -29,6 +29,10 @@ const pluginPackagingRecoveryHint = [
 const runStartupConfigPreflightMock = vi.hoisted(() => vi.fn());
 const readConfigFileSnapshotMock = vi.hoisted(() => vi.fn());
 const setRuntimeConfigSnapshotMock = vi.hoisted(() => vi.fn());
+const assertMaintenanceReleased = vi.hoisted(() => vi.fn());
+vi.mock("../../gateway/maintenance-startup.js", () => ({
+  assertOrdinaryGatewayMaintenanceReleased: assertMaintenanceReleased,
+}));
 
 vi.mock("../../commands/startup-config-preflight.js", () => ({
   runStartupConfigPreflight: runStartupConfigPreflightMock,
@@ -105,6 +109,14 @@ async function withCapturedStdout(run: () => Promise<void>): Promise<string> {
 }
 
 describe("ensureConfigReady", () => {
+  it("refuses active maintenance before ordinary Gateway state/config preparation", async () => {
+    assertMaintenanceReleased.mockRejectedValueOnce(new Error("held maintenance generation"));
+    await expect(
+      ensureConfigReady({ runtime: makeRuntime(), commandPath: ["gateway", "run"] }),
+    ).rejects.toThrow("held maintenance generation");
+    expect(runStartupConfigPreflightMock).not.toHaveBeenCalled();
+    expect(readConfigFileSnapshotMock).not.toHaveBeenCalled();
+  });
   const resetConfigGuardStateForTests = testApi.resetConfigGuardStateForTests;
   const tempRoots: string[] = [];
   let envSnapshot: ReturnType<typeof captureEnv> | undefined;

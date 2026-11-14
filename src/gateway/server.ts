@@ -53,7 +53,11 @@ export async function startGatewayServer(
     signal?.addEventListener("abort", onOwnerLost, { once: true });
     detachOwner = () => signal?.removeEventListener("abort", onOwnerLost);
     signal?.throwIfAborted();
-    const server = await startGatewayServerWithRuntime(port, { ...opts, gatewayStateOwner });
+    const { startGatewayMaintenanceIfRequired } = await import("./maintenance-startup.js");
+    const ownedOptions = { ...opts, gatewayStateOwner };
+    const server =
+      (await startGatewayMaintenanceIfRequired(port, ownedOptions, signal)) ??
+      (await startGatewayServerWithRuntime(port, ownedOptions));
     let closing: Promise<void> | undefined;
     const closeServer: GatewayServer["close"] = (closeOptions) => {
       detachOwner?.();

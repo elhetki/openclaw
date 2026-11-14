@@ -16,6 +16,14 @@ function resolvePolicy(params: {
 }
 
 describe("command-startup-policy", () => {
+  it.each(["maintenance-bootstrap", "maintenance-run"])(
+    "defers %s config/state preparation to its exclusive owner",
+    (command) => {
+      const policy = resolvePolicy({ commandPath: ["gateway", command] });
+      expect(policy.skipConfigGuard).toBe(true);
+      expect(policy.loadPlugins).toBe(false);
+    },
+  );
   it.each(["gateway"])("defers only %s installs with a runtime expectation", (parent) => {
     const commandPath = [parent, "install"];
     expect(resolvePolicy({ commandPath }).skipConfigGuard).toBe(false);

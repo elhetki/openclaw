@@ -24,6 +24,7 @@ import { parseTimeoutMsWithFallback } from "../parse-timeout.js";
 import { setCommandJsonMode } from "../program/json-mode.js";
 import type { GatewayDiscoverOpts } from "./discover.js";
 import { isGatewayMachineOutput } from "./output-mode.js";
+import { addGatewayMaintenanceBootstrapCommand } from "./register-maintenance-bootstrap.js";
 import { addGatewayRestartHandoffCommands } from "./register-restart-handoff.js";
 import { addGatewayRunCommand } from "./run-command.js";
 import { normalizeStabilityBundleTarget } from "./stability-bundle-target.js";
@@ -342,6 +343,7 @@ export function registerGatewayCli(program: Command) {
   });
   addGatewayRestartHandoffCommands(gateway);
   setCommandJsonMode(gateway, "output", ({ argv }) => isGatewayMachineOutput(argv));
+  addGatewayMaintenanceBootstrapCommand(gateway);
 
   gateway
     .command("auth-token")

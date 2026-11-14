@@ -110,50 +110,142 @@ The bundled OpenRouter manifest now explicitly consents in a separate reviewed
 change. Its actual registration test confirms no competing access policy, and the
 normal-loader conflict regression covers both ordinary and OpenRouter IDs.
 The focused suites passed 59 tests on Node 26.1.0 (43.22 s); independent review
-found no P0–P2 defects. Nate native still requires its own reviewed declaration.
+found no P0–P2 defects. Nate's native declaration was subsequently read-only
+validated by the actual manifest loader; that does not qualify installed runtime.
 Nate must
 also retain a separate root-held coordinator credential; the Home/broker admin
 credential is not maintenance authority. No TEST activation is qualified.
 
-## Required next patch sequence
+## Cold control and first-install checkpoint
 
-1. Select maintenance control bootstrap at `src/gateway/server.ts` after state
-   ownership but before `startGatewayServerWithRuntime` starts ordinary resources.
-   Preserve `server-startup-bootstrap.ts`'s existing refusal as defense for other
-   entrypoints. An active generation must restore admission before producer
-   setup. Never use minimal-test or update-canary flags as production authority.
-   Read complete metadata for every configured workspace, admit manifest consent,
-   and retain config observation without loading plugin JavaScript. Current
-   refusal must remain until real restart tests prove the replacement path.
-2. Extend the runtime owner into recovery. Existing protocol handlers bind the
-   generation to the authenticated, current coordinator device token and exact
-   agent/session; reject shared-token, other-device, stale-owner and revoked
-   credentials. Revalidate at effect commit after awaits. Syntax validation of
-   the stored binding is not authentication.
-3. The runtime handlers now close admission before persisting begin, pause cron
-   scheduling, and inspect the
-   complete `createGatewayActiveWorkSnapshot` plus server inspectors and write
-   custody. Qualify this through public WebSocket and lifecycle tests, including
-   exact pending-operation continuations while draining. Never
-   call a snapshot with omitted inspectors an all-writer proof. Keep closure on
-   persistence/inspection failure; no timer may reopen it.
-4. Introduce one capability-scoped enrollment operation, not an exemption for
-   general `sessions.create`. At `session-create-service.ts`'s
-   `createSessionEntryWithTranscript` callback, require actual row absence and the
-   exact canonical target. Existing sessions are otherwise adoptable today.
-   Persist pending before mutation, record the real lifecycle receipt, and keep
-   uncertain outcomes closed. Prove public transport and post-publication reads.
-   The low-level creator accepts caller-prepared session IDs/revisions and carries
-   observed absence into its native worker conflict check. A planned receipt may
-   therefore allow crash reconciliation without adding another session store,
-   but this must be proven at the canonical transaction and publication boundary.
-5. Implement explicit crash reconciliation for pending/enrolled states and a
-   generation-bound release CAS. Current state transition deliberately refuses
-   automatic recovery of these states. Never reopen based on a lost response,
-   expiry, matching session key alone, or startup reset.
-6. Prove cold restart, same-process restart, revoked device during await, concurrent
-   begin/enroll/release, lost reply, crashes around each durable boundary,
-   ordinary HTTP/WS/plugin/cron rejection, drain custody, and default-off behavior.
+This source checkpoint remains **not ready for enrollment or TEST activation**.
+It adds a lean foreground `gateway maintenance-run --port <port>` entry, selected
+before ordinary Gateway resources, and explicit offline
+`gateway maintenance-bootstrap --request-stdin`. Both skip ordinary CLI config
+repair/plugin loading and acquire real exclusive canonical state ownership.
+Ordinary Gateway CLI preflight refuses an active durable maintenance intent.
+
+The cold runtime admits only complete, consenting manifest metadata, watches
+configuration for invalidation, and loads no plugin JavaScript. It binds only
+127.0.0.1, returns HTTP 503 for all ordinary requests, rejects browser Origin and
+forwarding headers, and provides no ordinary session/device RPC. Config change,
+unreadable state, authority loss, or uncertain worker commit never enables normal
+startup. Release persists state but leaves the admission hold and control-only
+listener until explicit process termination. A fresh normal process is required.
+
+### Host bootstrap contract
+
+Export: `bootstrapGatewayMaintenanceOffline(value)` in
+`src/gateway/maintenance-bootstrap.ts`. The explicit CLI accepts at most 8192
+stdin bytes within 10 seconds; stdin and stdout must be pipes or sockets. This
+checks descriptor type, not pipe ownership: the root launcher must create and
+retain private pipes and never route the receipt to logs or Home/broker.
+
+Input has exactly six fields:
+`{requestId, agentId, sessionKey, publicKey, signedAt, signature}`. Request ID is a
+UUID, agent/session must be exact canonical targets, public key is raw Ed25519
+base64url (43 characters), signedAt is epoch milliseconds within 120 seconds,
+and signature is Ed25519 base64url (86 characters). Sign the UTF-8 JSON produced
+by `buildGatewayMaintenanceBootstrapPayload`:
+
+```text
+["openclaw-maintenance-bootstrap-v1", requestId, agentId, sessionKey, publicKey, signedAt]
+```
+
+Root must persist its request/key/target journal and fence ordinary services,
+foreign writers, and config before launching the principal-UID one-shot. Root
+sends only public key and signed request; the private signing key never leaves
+root custody. Pairing, token issuance, and the draining intent share one canonical
+SQLite transaction. Receipt:
+`{version:1, state, credential:{deviceId,publicKey,role:"operator",token}}`.
+`state` is the exact version-2 maintenance state with generation, requestId,
+ownerInstanceId, binding (including tokenIdentityKey), and phase `draining`.
+The token persists canonically in principal state; the root-only signing key is
+the maintenance authorization boundary. Keep that key distinct from Home/broker.
+
+If acknowledgment is lost, preserve the journal and retry the same request ID,
+key, agent, and session with a fresh signed timestamp. Only an unchanged draining
+receipt and exact current credential reconcile. A different request/key/target,
+rotated credential, held/pending/enrolled/released phase, or pre-existing device
+refuses; never guess success or generate a replacement key. This is deliberately
+first-install-only. It cannot initialize another generation after release.
+Earlier normal-runtime `gateway.maintenance.prepare` source exists, but the
+complete later-generation operational flow is not qualified by this checkpoint
+and stays unavailable for TEST integration.
+
+### Cold wire contract
+
+Connect to `ws://127.0.0.1:<port>/` without Origin/forwarding headers. Server sends
+`{type:"event",event:"connect.challenge",payload:{nonce,ts}}`. Send the canonical
+request frame `{type:"req",id,method:"connect",params}` with protocol range
+including 4; client id/mode `cli`; role `operator`; scopes exactly
+`["operator.admin"]`; auth exactly `{deviceToken:token}`; and device
+`{id,publicKey,signature,signedAt,nonce}`. Sign the canonical v3 payload built by
+`packages/gateway-client/src/device-auth.ts:buildDeviceAuthPayloadV3`, using the
+same client/platform, token, scopes, nonce and timestamp. Device identity must
+match the durable coordinator; signature freshness window is 120 seconds.
+Current paired token, approval identity and issuer are checked inside the state
+transaction on connect and every command.
+
+Successful connect payload is
+`{type:"maintenance-hello",protocol:4,maintenance:true,methods:[...]}`;
+it is intentionally not the ordinary Gateway hello. Only
+`gateway.maintenance.status`, `gateway.maintenance.recover`, and
+`gateway.maintenance.release` exist. Each accepts exactly `{generation}`.
+Replies use canonical `{type:"res",id,ok,payload}`; command payload contains
+`{state,processOwnerInstanceId,owned,work,controlOnly:true,readyForEnrollment:false}`.
+Status does not acquire ownership. After restart, even durable held state requires
+explicit recover by the signed owner before release. Recover drains the cold
+runtime and moves state to held. Do not equate cold `work.idle` with a foreign OS
+writer fence. Release only accepts this process's held generation and never
+starts normal machinery. Mutation uncertainty latches closure; restart and
+explicit state reconciliation are required. No enrollment method is advertised.
+
+### Verification and remaining risks
+
+Supported Node 26.1.0 passed the real public-server entry, separate-process lean
+restart, non-loopback config refusal and unconsenting-plugin refusal scenarios
+(4 tests, 61.82 seconds). They prove signed challenge admission, ordinary RPC
+refusal, exact-generation recovery, old-owner release refusal, release without
+automatic resume, no plugin JS, and durable intent preservation on config/policy
+refusal. CLI startup policy passed 11 tests; config preflight and default-off
+registration siblings passed 37 tests. Atomic bootstrap rollback and lost-reply
+reopen/retry passed (9.73 seconds); the lost reply is simulated by discarding a
+committed result and reopening state, not by interrupting an installed host pipe.
+
+Autoreview examined the frozen local delta and owner context with Sol medium.
+It reported one P2 suggesting bootstrap reuse after release. Declined: that would
+expand the approved first-install-only authority; refusal is intentional and has
+a regression assertion. No P0/P1 findings were reported. The helper excluded
+`pairing-token.ts` as a sensitive filename, so this is an explicit independent
+review coverage limit, not an unconditional clean report. Local inspection finds
+blank rejection followed by canonical `safeEqualSecret`, which compares padded
+UTF-8 buffers with Node `timingSafeEqual` and requires equal original lengths.
+The recovery worker fixture rejects wrong tokens and revoked/changed identities
+(6.56 seconds). The final bootstrap fixture also proves refused reissue after
+release (10.65 seconds). All touched TypeScript passed lint and the core typecheck.
+Canonical Node 26.1.0 build passed in 2m 6.9s; the final diagnostic-text head
+passed again in 2m 2.3s, including SDK declarations, CLI
+bootstrap imports, UI budgets and final CLI metadata. This is source/build proof,
+not an immutable final package or installed command qualification.
+
+Remaining activation blockers (P1-level safety boundaries):
+
+- Home device pairing and exact physical Home session creation are unimplemented
+  in the cold transport. Separate shared-state/session databases require durable
+  owner-only steps, exact absence CAS, physical sessionId/lifecycle receipts,
+  lost-ack reconciliation and no release while incomplete. Never substitute
+  ordinary `device.pair`, `sessions.resolve`, or `sessions.create`.
+- No installed Linux command/package/UID/pipe qualification, resource-capacity
+  qualification, host foreign-writer fence, SQL control-off attestation, or
+  candidate Home/broker/socket/session/approval proof is supplied here.
+- Native cold-function tests and CLI policy/registration tests do not by themselves
+  qualify the final packaged CLI startup path. Final build, immutable dependency
+  closure, provenance/inventory validation and installed command tests remain.
+- Config observation invalidates on the canonical watcher signal; host custody
+  must prevent unauthorized config replacement during this root transaction.
+- Arbitrary same-UID direct DB writers are outside the Gateway lock/admission
+  boundary. No timer, metadata flag or fabricated boolean fills that gap.
 
 ## External custody gap
 
