@@ -60,6 +60,8 @@ export type GatewayServer = {
 };
 
 export type GatewayServerOptions = {
+  /** Trusted startup only; never sourced from config, RPC, or plugin tool arguments. */
+  externalNodeInvokeAuthority?: import("./node-invoke-external-authority.js").ExternalNodeInvokeAuthorityProvider;
   /** Retained run-loop ownership; direct servers acquire and release their own owner. */
   gatewayStateOwner?: Pick<
     import("../infra/gateway-lock.js").GatewayLockHandle,

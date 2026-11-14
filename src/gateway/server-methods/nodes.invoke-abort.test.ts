@@ -7,6 +7,7 @@ import {
   releaseAgentRunDelegatedAuthority,
 } from "../../infra/agent-run-registry.js";
 import { NODE_WORKER_SUPERVISOR_STATUS_COMMAND } from "../../infra/node-commands.js";
+import { requireExternalNodeInvokeAuthority } from "../node-invoke-external-authority.js";
 import type { NodeRegistry } from "../node-registry.js";
 import { isNodeWakeLifecycleCurrent } from "../node-wake-state.js";
 import { resetNodeWakeStateForTest } from "../node-wake-state.test-support.js";
@@ -140,6 +141,82 @@ function createNodeInvokeStreamClient(
 }
 
 describe("host external node authority", () => {
+  it.each(["absent", "declined"])("denies protected clients when provider is %s", async (mode) => {
+    const client: NonNullable<GatewayRequestHandlerOptions["client"]> = {
+      connect: {
+        minProtocol: 3,
+        maxProtocol: 3,
+        client: { id: "gateway-client", version: "internal", platform: "node", mode: "backend" },
+        role: "operator",
+        scopes: ["operator.write"],
+      },
+    };
+    requireExternalNodeInvokeAuthority(client);
+    const invoke = vi.fn();
+    const { invocation, respond } = startNodeInvoke({
+      client,
+      invoke,
+      externalNodeInvokeAuthority: mode === "declined" ? () => undefined : undefined,
+    });
+    await invocation;
+    expect(invoke).not.toHaveBeenCalled();
+    expect(mocks.applyPluginNodeInvokePolicy).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({
+        details: { code: "EXTERNAL_AUTHORITY_CLOSED", nodeCommandDispatched: false },
+      }),
+    );
+  });
+
+  it("binds the protected provider to the exact node and withholds a revoked result", async () => {
+    const client: NonNullable<GatewayRequestHandlerOptions["client"]> = {
+      connect: {
+        minProtocol: 3,
+        maxProtocol: 3,
+        client: { id: "gateway-client", version: "internal", platform: "node", mode: "backend" },
+        role: "operator",
+        scopes: ["operator.write"],
+      },
+    };
+    requireExternalNodeInvokeAuthority(client);
+    let live = true;
+    const provider = vi.fn((request) => {
+      expect(request.client).toBe(client);
+      expect(request.nodeId).toBe("paired-node");
+      expect(request.command).toBe("ollama.chat");
+      expect(request.pairing).toEqual({
+        deviceId: "paired-node",
+        generation: "generation:paired-node:1",
+        connectionId: "paired-node-connection",
+      });
+      return { authorize: async () => live, isCurrent: () => live };
+    });
+    const invoke = vi.fn<NodeRegistry["invoke"]>(async (request) => {
+      expect(await request.authorizeDispatch?.()).toBe(true);
+      live = false;
+      return { ok: true, payload: { privateResult: "must not escape" } };
+    });
+    const { invocation, respond } = startNodeInvoke({
+      client,
+      invoke,
+      externalNodeInvokeAuthority: provider,
+      requestParams: {
+        expectedPairing: {
+          deviceId: "paired-node",
+          generation: "generation:paired-node:1",
+          connectionId: "paired-node-connection",
+        },
+      },
+    });
+    await invocation;
+    expect(provider).toHaveBeenCalledOnce();
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(respond.mock.calls.at(-1)?.[0]).toBe(false);
+    expect(JSON.stringify(respond.mock.calls)).not.toContain("must not escape");
+  });
+
   it.each(["allowed", "dispatch-denied", "broker-offline", "revoked", "result-denied", "retry"])(
     "checks every effect and result (%s)",
     async (outcome) => {

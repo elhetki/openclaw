@@ -61,6 +61,17 @@ function makeDeviceClient(connId: string, deviceId: string, role = "primary") {
 }
 
 describe("createGatewayRequestContext", () => {
+  it("retains only the explicitly installed host node authority provider", () => {
+    const provider = vi.fn(() => undefined);
+    expect(
+      createGatewayRequestContext(makeContextParams()).externalNodeInvokeAuthority,
+    ).toBeUndefined();
+    expect(
+      createGatewayRequestContext({ ...makeContextParams(), externalNodeInvokeAuthority: provider })
+        .externalNodeInvokeAuthority,
+    ).toBe(provider);
+  });
+
   it("keeps startup observation bound to copied contexts after transport context loss", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
       vi.useFakeTimers();

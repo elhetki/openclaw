@@ -51,6 +51,7 @@ export async function prepareGatewayKernelRequestRuntime(params: {
     const { createGatewayRequestContext } = await import("./server-request-context.js");
     return createGatewayRequestContext({
       runtime,
+      externalNodeInvokeAuthority: runtime.opts.externalNodeInvokeAuthority,
       configRevisionProjector,
       chatMetadataLifecycle,
       log,

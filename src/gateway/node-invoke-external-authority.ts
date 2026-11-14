@@ -3,6 +3,22 @@ import { freezeJsonSnapshot } from "../shared/immutable-data.js";
 import type { GatewayClient } from "./server-methods/client-types.js";
 import type { RespondFn } from "./server-methods/types.js";
 
+// Object identity is host-owned; wire fields and model arguments cannot opt out.
+const protectedClients = new WeakSet<GatewayClient>();
+
+/** Register the exact authenticated client used by a trusted external host.
+ * Registration is intentionally irreversible for this client lifetime. A host
+ * must register every replacement client before dispatching protected requests.
+ */
+export function requireExternalNodeInvokeAuthority(client: GatewayClient): void {
+  protectedClients.add(client);
+}
+
+const closedAuthority: ExternalNodeInvokeAuthority = {
+  authorize: async () => false,
+  isCurrent: () => false,
+};
+
 /** Host-installed provider, never accepted from RPC params or plugin tool input.
  * The provider must identify protected requests from authenticated Gateway state,
  * throw when their binding is missing, and return undefined only for ordinary callers.
@@ -65,18 +81,20 @@ export function prepareExternalNodeInvokeAuthority(
   provider: ExternalNodeInvokeAuthorityProvider | undefined,
   request: Parameters<ExternalNodeInvokeAuthorityProvider>[0],
 ): { authority: ExternalNodeInvokeAuthority | undefined; params: unknown } {
+  const required = request.client !== null && protectedClients.has(request.client);
   if (!provider) {
-    return { authority: undefined, params: request.params };
+    return { authority: required ? closedAuthority : undefined, params: request.params };
   }
   try {
     const snapshot = freezeJsonSnapshot(structuredClone(request.params));
-    const authority = provider({ ...request, params: snapshot });
+    const authority =
+      provider({ ...request, params: snapshot }) ?? (required ? closedAuthority : undefined);
     return { authority, params: authority ? snapshot : request.params };
   } catch {
     // Construction errors may contain credentials or broker response bodies.
     // A closed binding cannot fall through to ordinary, unprotected dispatch.
     return {
-      authority: { authorize: async () => false, isCurrent: () => false },
+      authority: closedAuthority,
       params: undefined,
     };
   }

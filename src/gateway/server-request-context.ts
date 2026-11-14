@@ -163,6 +163,7 @@ type GatewayRequestContextRuntime = Pick<
   };
 
 type GatewayRequestContextParams = {
+  externalNodeInvokeAuthority?: GatewayRequestContext["externalNodeInvokeAuthority"];
   runtime: GatewayRequestContextRuntime;
   configRevisionProjector: GatewayRequestContext["configRevisionProjector"];
   chatMetadataLifecycle: {
@@ -507,6 +508,7 @@ export function createGatewayRequestContext(
       publishOperatorRoleConfigChange(context);
     },
     nodeRegistry,
+    externalNodeInvokeAuthority: params.externalNodeInvokeAuthority,
     ...(runtime.nodeDesktopService
       ? { [NODE_DESKTOP_SERVICE_CONTEXT]: runtime.nodeDesktopService }
       : {}),
