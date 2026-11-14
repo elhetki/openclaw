@@ -412,3 +412,99 @@ Telegram, public ingress, or package deployment was exercised. Root host fences,
 real principal/config provenance, live SQL control-off and receipt binding,
 private-pipe/UID isolation, process/listener attestation, final package provenance
 and the existing 4 GB VM capacity remain required activation gates.
+
+## Offline released-receipt reconciliation
+
+This source slice addresses the released/lost-ack blocker above without reopening
+the cold listener or changing normal startup. The explicit command is:
+
+```text
+openclaw gateway maintenance-released-receipt --request-stdin
+```
+
+Both stdin and stdout must be private FIFO/socket pipes. Input is one JSON value,
+at most 8 KiB, completed within ten seconds. No credential belongs in argv or
+logs. Errors are generic and no success receipt is emitted on refusal. The source
+API is `readGatewayMaintenanceReleasedReceiptOffline(value)` in
+`src/gateway/maintenance-released-receipt.ts`; it is a one-shot and its process
+must exit afterward. The registered CLI skips ordinary config guards/plugin
+loading and owns machine-readable stdout.
+
+The closed nine-field request is:
+
+```text
+{generation, requestId, enrollmentRequestId, agentId, sessionKey,
+ publicKey, token, signedAt, signature}
+```
+
+`requestId` is the original bootstrap intent ID; `enrollmentRequestId` is the
+recorded Home enrollment ID. Generation and exact target must match the released
+state. `publicKey` and `token` belong to the separate root coordinator, never
+Home/broker. Public key and signature use raw Ed25519 base64url (43/86 characters).
+`signedAt` is integer Unix milliseconds within 120 seconds of verification. Sign
+the UTF-8 bytes of `JSON.stringify` of this exact array with the root private key:
+
+```text
+["openclaw-maintenance-released-receipt-v1", generation, requestId,
+ enrollmentRequestId, agentId, sessionKey, publicKey, token, signedAt]
+```
+
+`buildGatewayMaintenanceReleasedPayload` and
+`verifyGatewayMaintenanceReleasedRequest` own that source wire contract.
+Read-only retries can sign the same journaled identities with a fresh timestamp;
+there is no new generation, approval, credential or receipt allocation.
+
+Success is one JSON object, without a WebSocket response envelope:
+
+```text
+{version:1, state, receipt:{sessionId,lifecycleRevision},
+ readOnly:true, readyForActivation:false}
+```
+
+State is the unchanged version-2 released marker, including its original process
+owner ID, coordinator binding and Home enrollment. No token is returned. The
+current root approval/token identity and current Home credential must still
+match. The command verifies the exact physical session and lifecycle, empty
+transcript header/watermark and absence of an active writer. It refuses any other
+phase, missing receipt, changed target or credential, changed physical session,
+retained transcript content, concurrent Gateway owner or unknown plugin policy.
+
+Only canonical per-agent session stores are supported; custom/shared/ambiguous
+store layouts fail closed. The command uses `sqlite-maintenance` lock custody,
+artifact-preserving shared reads and a private agent database snapshot. The
+canonical native session-read kernel runs under the existing CLI one-shot
+exception; its physical-receipt validator is shared with live enrollment/release.
+Normal Gateway lease reads and ordinary session workers can create empty source
+WAL/SHM files, so they are not used for this offline inspection. No source sidecar
+cleanup is used to hide writes. Snapshot resources close before lock release;
+failed cleanup preserves ownership.
+
+Root must retain the foreign-writer/config fence before launch and through
+receipt acceptance/publication, pin the exact executable/package and UID, and
+compare every receipt field with its private journal. The output is a verified
+snapshot under that custody, not a durable permission to activate later. The
+command does not prove the external host/SQL fence, publish approvals, release a
+generation, start a service, or authenticate a loopback listener.
+
+Focused native tests passed 4/4 (110.50 seconds): discarded release acknowledgment
+and fresh-process retry (51.37 seconds), changed physical revision (20.11),
+transcript mutation (19.82), and Home credential rotation (18.72). They exercise
+the registered CLI over private pipes, wrong signed coordinator/generation/token/
+enrollment ID, concurrent-owner refusal, unchanged SQLite/WAL/SHM bytes and no
+plugin JS. For contention, the comparison begins after the competing normal
+Gateway owner opens its own lease sidecars. The existing public enrollment/release
+boundary passed again (21.70 seconds), as did all three targeted CLI startup-policy
+cases. Core typecheck and touched-file lint passed. An inherited indexed-access
+type error in the prior checkpoint's final strengthened test assertion was fixed
+with an explicit row-presence assertion; its runtime behavior was already tested.
+
+The root package declares Node `>=24.16.0 <25 || >=26.1.0`. This slice's tests use
+Node 26.1.0; TEST's Node 24.22.1 is in range but still needs focused runtime proof.
+No VM, Nate checkout, external database, GitHub or runtime installation changed.
+
+Fresh independent autoreview reported scoped-clean P0–P2 (Sol medium), retaining
+the external-fence/attestation/journal and excluded token-comparison coverage
+limits. The canonical Node 26.1.0 build passed in 14 minutes 51.6 seconds, including
+workspace and unified declarations, core/plugin bundles, SDK export checks,
+startup-import checks and UI. These are source gates; no immutable root runtime
+package or installed Linux unit is qualified by this checkpoint.

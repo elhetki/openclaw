@@ -22,6 +22,29 @@ export function addGatewayMaintenanceBootstrapCommand(gateway: Command): void {
       }
     });
   gateway
+    .command("maintenance-released-receipt")
+    .description("Read an authenticated released receipt under exclusive offline host custody")
+    .option("--request-stdin", "Read the signed request over private pipes", false)
+    .action(async (opts: { requestStdin?: boolean }) => {
+      try {
+        if (!opts.requestStdin) {
+          throw new Error("Pass --request-stdin for explicit offline receipt reconciliation");
+        }
+        const { readMaintenancePrivatePipeRequest } = await import("./maintenance-private-pipe.js");
+        const { readGatewayMaintenanceReleasedReceiptOffline } =
+          await import("../../gateway/maintenance-released-receipt.js");
+        defaultRuntime.writeJson(
+          await readGatewayMaintenanceReleasedReceiptOffline(
+            await readMaintenancePrivatePipeRequest(),
+          ),
+        );
+      } catch {
+        // Never include input, credentials or internal read errors in CLI diagnostics.
+        defaultRuntime.error("Offline maintenance released receipt refused");
+        defaultRuntime.exit(1);
+      }
+    });
+  gateway
     .command("maintenance-bootstrap")
     .description("Initialize the first coordinator maintenance intent under offline host custody")
     .option(

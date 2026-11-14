@@ -191,6 +191,17 @@ export const cliCommandCatalog: readonly CliCommandCatalogEntry[] = [
     },
   },
   {
+    commandPath: ["gateway", "maintenance-released-receipt"],
+    exact: true,
+    policy: {
+      configGuard: "skip",
+      loadPlugins: "never",
+      networkProxy: "bypass",
+      ensureCliPath: false,
+      ownsProtocolStdout: true,
+    },
+  },
+  {
     commandPath: ["gateway", "maintenance-run"],
     exact: true,
     policy: {

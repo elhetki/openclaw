@@ -16,7 +16,7 @@ function resolvePolicy(params: {
 }
 
 describe("command-startup-policy", () => {
-  it.each(["maintenance-bootstrap", "maintenance-run"])(
+  it.each(["maintenance-bootstrap", "maintenance-run", "maintenance-released-receipt"])(
     "defers %s config/state preparation to its exclusive owner",
     (command) => {
       const policy = resolvePolicy({ commandPath: ["gateway", command] });

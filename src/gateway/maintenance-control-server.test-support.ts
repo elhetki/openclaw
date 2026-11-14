@@ -464,11 +464,10 @@ await withOpenClawTestState({ label: "maintenance-public-control" }, async (fixt
             }),
           );
           assert.equal(physicalBeforeRestart.entries.length, 1);
-          assert.equal(physicalBeforeRestart.entries[0].entry.sessionId, planned.sessionId);
-          assert.equal(
-            physicalBeforeRestart.entries[0].entry.lifecycleRevision,
-            planned.lifecycleRevision,
-          );
+          const physicalRow = physicalBeforeRestart.entries[0];
+          assert.ok(physicalRow);
+          assert.equal(physicalRow.entry.sessionId, planned.sessionId);
+          assert.equal(physicalRow.entry.lifecycleRevision, planned.lifecycleRevision);
           assert.equal((await readGatewayMaintenanceState())?.phase, "enrollment_pending");
         } finally {
           await resources.close();

@@ -4,6 +4,7 @@ export function isGatewayMachineOutput(argv: readonly string[]): boolean {
   const [, command, action] = resolveGatewayCommandPath([...argv], 3) ?? [];
   return (
     command === "maintenance-bootstrap" ||
+    command === "maintenance-released-receipt" ||
     (command === "restart-handoff" && (action === "capabilities" || action === "consume"))
   );
 }

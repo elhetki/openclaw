@@ -7,6 +7,10 @@ import {
 } from "./worker-operation-registry.js";
 
 const loaders = {
+  gatewayMaintenance: () =>
+    import("../infra/gateway-maintenance-released.read.worker.js").then(
+      (m) => m.gatewayMaintenanceReleasedReadOperations,
+    ),
   machineState: () =>
     import("./config-machine-state.read.worker.js").then((m) => m.machineStateReadOperations),
   projects: () =>

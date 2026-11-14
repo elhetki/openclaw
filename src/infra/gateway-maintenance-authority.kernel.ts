@@ -26,9 +26,24 @@ export function readAuthorizedGatewayMaintenanceInDatabase(
   database: Pick<OpenClawStateDatabase, "db">,
   input: GatewayMaintenanceAuthority,
 ) {
+  return authorizeGatewayMaintenanceStateInDatabase(
+    database,
+    readGatewayMaintenanceInDatabase(database),
+    input,
+  );
+}
+
+export function readGatewayMaintenanceInDatabase(database: Pick<OpenClawStateDatabase, "db">) {
+  const row = readConfigMachineStateRowInDatabase(database.db, gatewayMaintenanceStateKey);
+  return parseGatewayMaintenanceState(row ? JSON.parse(row.value_json) : undefined);
+}
+
+export function authorizeGatewayMaintenanceStateInDatabase(
+  database: Pick<OpenClawStateDatabase, "db">,
+  state: GatewayMaintenanceState | undefined,
+  input: GatewayMaintenanceAuthority,
+) {
   const { db } = database;
-  const row = readConfigMachineStateRowInDatabase(db, gatewayMaintenanceStateKey);
-  const state = parseGatewayMaintenanceState(row ? JSON.parse(row.value_json) : undefined);
   const binding = input.binding;
   const device =
     readPairedDevicePairingSnapshotFromDatabase(db, binding.deviceId).pairedByDeviceId[

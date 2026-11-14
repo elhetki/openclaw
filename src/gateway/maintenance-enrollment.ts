@@ -1,11 +1,7 @@
-import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
 import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
 import { createSessionEntryWithTranscript } from "../config/sessions/session-accessor.js";
-import {
-  readSessionEntriesFromStoreInWorker,
-  withSessionEntriesFromStoreInWorker,
-} from "../config/sessions/session-entry-read-runtime.js";
+import { readSessionEntriesFromStoreInWorker } from "../config/sessions/session-entry-read-runtime.js";
 import type { SessionEntryWorkerRead } from "../config/sessions/session-entry-read-runtime.types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { withDevicePairingLock } from "../infra/device-pairing-lock.js";
@@ -14,6 +10,10 @@ import type { GatewayMaintenanceAuthority } from "../infra/gateway-maintenance-a
 import type { GatewayMaintenanceHomeRequest } from "../infra/gateway-maintenance-home.kernel.js";
 import type { GatewayMaintenanceReceipt } from "../infra/gateway-maintenance-state.js";
 import type { OpenClawDatabaseMaintenanceScope } from "../state/openclaw-state-maintenance-context.js";
+import {
+  gatewayMaintenancePhysicalRead,
+  withGatewayMaintenancePhysicalReceipt,
+} from "./maintenance-physical-receipt.js";
 
 export type GatewayMaintenanceEnrollmentInput = GatewayMaintenanceAuthority & {
   ownerInstanceId: string;
@@ -75,69 +75,12 @@ async function withHomeOperation<T>(
           agentId: input.binding.agentId,
           env,
         });
-        const read: SessionEntryWorkerRead = {
-          agentId: input.binding.agentId,
-          storePath,
-          env,
-          sessionKeys: [input.binding.sessionKey],
-          projection: "exact",
-          includeAuthorization: true,
-          transcript: {
-            sessionKey: input.binding.sessionKey,
-            entryIds: [],
-            includeSession: true,
-            includeHeader: true,
-            includeWatermark: true,
-            includeMessagePresence: true,
-            contextAuthority: true,
-          },
-        };
+        const read = gatewayMaintenancePhysicalRead(input.binding, storePath, env);
         return await operate({ device, read, assertCurrent, storePath, env });
       });
     } finally {
       active = false;
     }
-  });
-}
-
-type HomeContext = Parameters<Parameters<typeof withHomeOperation>[2]>[0];
-
-async function withPhysicalReceipt<T>(
-  context: HomeContext,
-  input: GatewayMaintenanceEnrollmentInput,
-  consume: (receipt: GatewayMaintenanceReceipt, assertCurrent: () => void) => Promise<T>,
-) {
-  return withSessionEntriesFromStoreInWorker(context.read, async (read) => {
-    const assertCurrent = () => {
-      context.assertCurrent();
-      read.assertCurrent();
-    };
-    assertCurrent();
-    const result = read.result;
-    const row = result.entries.length === 1 ? result.entries[0] : undefined;
-    const planned = context.device.planned;
-    const transcript = result.transcript;
-    const header = transcript?.header;
-    if (
-      read.database.agentId !== input.binding.agentId ||
-      !row ||
-      row.sessionKey !== input.binding.sessionKey ||
-      row.entry.sessionId !== planned.sessionId ||
-      row.entry.lifecycleRevision !== planned.lifecycleRevision ||
-      row.entry.activeWriterRunId ||
-      transcript?.contextAuthority?.entry?.activeWriterRunId ||
-      transcript?.session?.sessionId !== planned.sessionId ||
-      transcript.session.lifecycleRevision !== planned.lifecycleRevision ||
-      !isRecord(header) ||
-      header.type !== "session" ||
-      header.id !== planned.sessionId ||
-      !transcript.watermark?.generation ||
-      transcript.watermark.maxSeq !== 0 ||
-      transcript.messagePresence !== false
-    ) {
-      throw new Error("Maintenance physical session receipt or emptiness does not match");
-    }
-    return await consume(planned, assertCurrent);
   });
 }
 
@@ -183,14 +126,21 @@ export function enrollGatewayMaintenanceHomeSession(
         throw new Error("Maintenance session absence was not preserved");
       }
     }
-    return withPhysicalReceipt(context, input, async (receipt, assertCurrent) =>
-      executeDevicePairingMutation(
-        {
-          type: "devicePairing.enrollMaintenanceHome",
-          input: { ...input, action: "confirm", receipt },
-        },
-        { assertCurrent },
-      ),
+    return withGatewayMaintenancePhysicalReceipt(
+      {
+        read: context.read,
+        assertCurrent: context.assertCurrent,
+        planned: context.device.planned,
+        binding: input.binding,
+      },
+      async (receipt, assertCurrent) =>
+        executeDevicePairingMutation(
+          {
+            type: "devicePairing.enrollMaintenanceHome",
+            input: { ...input, action: "confirm", receipt },
+          },
+          { assertCurrent },
+        ),
     );
   });
 }
@@ -203,6 +153,14 @@ export function withVerifiedGatewayMaintenanceHomeSession<T>(
   consume: (receipt: GatewayMaintenanceReceipt, assertCurrent: () => void) => Promise<T>,
 ) {
   return withHomeOperation(input, options, (context) =>
-    withPhysicalReceipt(context, input, consume),
+    withGatewayMaintenancePhysicalReceipt(
+      {
+        read: context.read,
+        assertCurrent: context.assertCurrent,
+        planned: context.device.planned,
+        binding: input.binding,
+      },
+      consume,
+    ),
   );
 }
