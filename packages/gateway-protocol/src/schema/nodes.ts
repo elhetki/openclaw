@@ -154,6 +154,14 @@ export const NodeInvokeParamsSchema = closedObject({
   params: Type.Optional(Type.Unknown()),
   timeoutMs: Type.Optional(Type.Integer({ minimum: 0 })),
   idempotencyKey: NonEmptyString,
+  // Optional caller admission pin. deviceId is the canonical authenticated
+  // public-key fingerprint, never a display name or target selector.
+  expectedPairing: Type.Optional(
+    closedObject({
+      deviceId: NonEmptyString,
+      generation: NonEmptyString,
+    }),
+  ),
   // Gateway-only agent ownership metadata. Forwarded beside params, never inside them.
   sessionKey: Type.Optional(NonEmptyString),
   // Gateway-only approval routing metadata. Node forwarding strips these fields.

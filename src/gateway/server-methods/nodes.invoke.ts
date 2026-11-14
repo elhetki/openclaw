@@ -212,7 +212,13 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
         respondIfInvokeExpired();
         return;
       }
-      if (!generation) {
+      if (
+        !generation ||
+        (p.expectedPairing &&
+          (p.expectedPairing.deviceId !== nodeId ||
+            p.expectedPairing.deviceId !== generation.nodeId ||
+            p.expectedPairing.generation !== generation.key))
+      ) {
         respondPairingChanged(respond);
         return;
       }

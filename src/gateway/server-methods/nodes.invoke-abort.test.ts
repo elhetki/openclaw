@@ -138,6 +138,76 @@ function createNodeInvokeStreamClient(
 }
 
 describe("node.invoke caller cancellation", () => {
+  it.each([
+    { deviceId: "different-device", generation: "generation:paired-node:1" },
+    { deviceId: "paired-node", generation: "generation:paired-node:old" },
+  ])(
+    "refuses a caller's stale target admission before node dispatch: %j",
+    async (expectedPairing) => {
+      const invoke = vi.fn<NodeRegistry["invoke"]>(async () => ({ ok: true, payload: {} }));
+      const { invocation, respond } = startNodeInvoke({
+        invoke,
+        requestParams: { expectedPairing },
+      });
+      await invocation;
+      expect(invoke).not.toHaveBeenCalled();
+      expect(mocks.applyPluginNodeInvokePolicy).not.toHaveBeenCalled();
+      expect(respond).toHaveBeenCalledWith(
+        false,
+        undefined,
+        expect.objectContaining({
+          details: expect.objectContaining({ code: "PAIRING_CHANGED" }),
+        }),
+      );
+    },
+  );
+
+  it("carries a matching admitted pairing into the final node transport", async () => {
+    const invoke = vi.fn<NodeRegistry["invoke"]>(async () => ({ ok: true, payload: {} }));
+    const { invocation, respond } = startNodeInvoke({
+      invoke,
+      requestParams: {
+        expectedPairing: { deviceId: "paired-node", generation: "generation:paired-node:1" },
+      },
+    });
+    await invocation;
+    expect(invoke).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nodeId: "paired-node",
+        expectedConnId: "paired-node-connection",
+        expectedPairingGeneration: "generation:paired-node:1",
+      }),
+    );
+    expect(respond).toHaveBeenCalledWith(true, expect.anything(), undefined);
+  });
+
+  it("refuses replacement of an admitted pairing while command policy awaits", async () => {
+    const invoke = vi.fn<NodeRegistry["invoke"]>(async () => ({ ok: true, payload: {} }));
+    mocks.applyPluginNodeInvokePolicy.mockImplementationOnce(async () => {
+      mocks.isNodePairingGenerationCurrent.mockResolvedValue(false);
+      return undefined;
+    });
+    try {
+      const { invocation, respond } = startNodeInvoke({
+        invoke,
+        requestParams: {
+          expectedPairing: { deviceId: "paired-node", generation: "generation:paired-node:1" },
+        },
+      });
+      await invocation;
+      expect(invoke).not.toHaveBeenCalled();
+      expect(respond).toHaveBeenCalledWith(
+        false,
+        undefined,
+        expect.objectContaining({
+          details: expect.objectContaining({ code: "PAIRING_CHANGED" }),
+        }),
+      );
+    } finally {
+      mocks.isNodePairingGenerationCurrent.mockResolvedValue(true);
+    }
+  });
+
   it.each([true, false])(
     "projects native permissions only into the authenticated session (bound=%s)",
     async (bound) => {

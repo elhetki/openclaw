@@ -47,6 +47,7 @@ Outcomes are retained past the credential's own expiry.
 - `node.list` and `node.describe` return known/connected node state.
 - `node.rename` updates a paired node label.
 - `node.invoke` forwards a command to a connected node.
+- Callers that admit work against a specific pairing may provide `expectedPairing: { deviceId, generation }` to `node.invoke`. `deviceId` is the canonical authenticated device fingerprint and must match `nodeId`; `generation` is the admitted node pairing generation. A mismatch returns `PAIRING_CHANGED` before wake or dispatch. The Gateway retains that generation and its selected connection through the existing transport checks. Omitting the optional precondition preserves ordinary invocation behavior. The precondition pins a target; it does not grant command permission or establish application task authority.
 - `node.invoke.result` returns the result for an invoke request.
   A node may return `NODE_NOT_READY` only when lifecycle cleanup prevented
   execution, before calling a command handler or emitting progress. The
