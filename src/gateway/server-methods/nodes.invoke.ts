@@ -17,6 +17,7 @@ import { isForbiddenBrowserProxyMutation } from "../node-browser-proxy-policy.js
 import { isNodeCommandAllowed, resolveNodeCommandAllowlist } from "../node-command-policy.js";
 import {
   checkExternalNodeAuthority,
+  createExternalNodeResultGuard,
   isExternalNodeAuthorityCurrent,
   respondExternalNodeAuthorityClosed,
   prepareExternalNodeInvokeAuthority,
@@ -57,7 +58,7 @@ import {
 import { wakeNodeForReconnect } from "./nodes.wake-reconnect.js";
 import { maybeSendNodeWakeNudge, maybeWakeNodeWithApns } from "./nodes.wake.js";
 import { respondUnavailableOnThrow } from "./response.js";
-import type { GatewayRequestHandlers } from "./types.js";
+import type { GatewayRequestHandlers, RespondFn } from "./types.js";
 import { assertValidParams } from "./validation.js";
 
 export const nodeInvokeHandlers: GatewayRequestHandlers = {
@@ -178,10 +179,11 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
     const respondWithInvocationResult = (
       result: { payload?: unknown; payloadJSON?: string | null },
       responsePayload: "original" | "decoded",
+      respondResult: RespondFn,
     ) => {
       const payload = result.payloadJSON ? parseGatewayPayload(result.payloadJSON) : result.payload;
       emitTalkPttNodeEvent({ context, nodeId, command, payload });
-      respond(
+      respondResult(
         true,
         {
           ok: true,
@@ -422,24 +424,23 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
               connectionId: nodeSession.connId,
             },
           });
-        if (externalAuthority && (!p.expectedPairing?.connectionId || nodeInvokeStream)) {
+        if (
+          externalAuthority &&
+          (!isExternalNodeAuthorityCurrent(externalAuthority) ||
+            !p.expectedPairing?.connectionId ||
+            nodeInvokeStream)
+        ) {
           // Streaming needs a separate check per chunk; do not leak partial results.
           respondExternalNodeAuthorityClosed(respond, nodeCommandDispatched);
           return;
         }
-        const authorizeExternalResult = async () => {
-          if (!externalAuthority) {
-            return true;
-          }
-          const allowed = await withinInvokeDeadline(() =>
-            checkExternalNodeAuthority(externalAuthority, "result"),
-          );
-          if (allowed !== true) {
-            respondExternalNodeAuthorityClosed(respond, nodeCommandDispatched);
-            return false;
-          }
-          return continuePairingWork();
-        };
+        const resultGuard = createExternalNodeResultGuard(
+          externalAuthority,
+          (owner) => withinInvokeDeadline(() => checkExternalNodeAuthority(owner, "result")),
+          continuePairingWork,
+          respond,
+          () => nodeCommandDispatched,
+        );
         if (forwardedParams.approvalAuthority) {
           const authority = forwardedParams.approvalAuthority;
           releaseApprovalHandoff =
@@ -515,7 +516,7 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
           return;
         }
         if (policyResult) {
-          if (!(await authorizeExternalResult())) {
+          if (!(await resultGuard.authorize()) || !resultGuard.release()) {
             return;
           }
           // Plugin policies can satisfy an invocation without crossing the raw
@@ -532,7 +533,7 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
             const errorCode = policyResult.unavailable
               ? ErrorCodes.UNAVAILABLE
               : ErrorCodes.INVALID_REQUEST;
-            respond(
+            resultGuard.respond(
               false,
               undefined,
               errorShape(errorCode, permission?.message ?? policyResult.message, {
@@ -545,7 +546,7 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
             );
             return;
           }
-          respondWithInvocationResult(policyResult, "original");
+          respondWithInvocationResult(policyResult, "original", resultGuard.respond);
           return;
         }
         const dispatchSession = resolveDispatchableNodeSession(
@@ -618,7 +619,7 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
         if (!(await continuePairingWork())) {
           return;
         }
-        if (!(await authorizeExternalResult())) {
+        if (!(await resultGuard.authorize()) || !resultGuard.release()) {
           return;
         }
         if (!res.ok) {
@@ -699,7 +700,7 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
             );
             return;
           }
-          respondUnavailableOnNodeInvokeErrorWithProvenance(respond, res, {
+          respondUnavailableOnNodeInvokeErrorWithProvenance(resultGuard.respond, res, {
             nodeCommandDispatched,
             ...publishNodePermissionMissing({
               error: res.error,
@@ -712,7 +713,7 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
           });
           return;
         }
-        respondWithInvocationResult(res, "decoded");
+        respondWithInvocationResult(res, "decoded", resultGuard.respond);
       } finally {
         releaseApprovalHandoff?.();
         releaseNodeWakeLifecycle(nodeId, wakeLifecycle);

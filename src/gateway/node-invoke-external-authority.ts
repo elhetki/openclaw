@@ -68,7 +68,50 @@ export function prepareExternalNodeInvokeAuthority(
   if (!provider) {
     return { authority: undefined, params: request.params };
   }
-  const snapshot = freezeJsonSnapshot(structuredClone(request.params));
-  const authority = provider({ ...request, params: snapshot });
-  return { authority, params: authority ? snapshot : request.params };
+  try {
+    const snapshot = freezeJsonSnapshot(structuredClone(request.params));
+    const authority = provider({ ...request, params: snapshot });
+    return { authority, params: authority ? snapshot : request.params };
+  } catch {
+    // Construction errors may contain credentials or broker response bodies.
+    // A closed binding cannot fall through to ordinary, unprotected dispatch.
+    return {
+      authority: { authorize: async () => false, isCurrent: () => false },
+      params: undefined,
+    };
+  }
+}
+
+export function createExternalNodeResultGuard(
+  authority: ExternalNodeInvokeAuthority | undefined,
+  checkResult: (authority: ExternalNodeInvokeAuthority) => Promise<unknown>,
+  checkPairing: () => Promise<boolean>,
+  respond: RespondFn,
+  wasDispatched: () => boolean,
+): { authorize: () => Promise<boolean>; release: () => boolean; respond: RespondFn } {
+  const release = () => {
+    if (!authority || isExternalNodeAuthorityCurrent(authority)) {
+      return true;
+    }
+    respondExternalNodeAuthorityClosed(respond, wasDispatched());
+    return false;
+  };
+  return {
+    release,
+    respond: (...args) => {
+      if (release()) {
+        respond(...args);
+      }
+    },
+    authorize: async () => {
+      if (!authority) {
+        return true;
+      }
+      if ((await checkResult(authority)) !== true) {
+        respondExternalNodeAuthorityClosed(respond, wasDispatched());
+        return false;
+      }
+      return (await checkPairing()) && release();
+    },
+  };
 }

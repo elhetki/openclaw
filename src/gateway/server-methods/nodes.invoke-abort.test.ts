@@ -192,6 +192,96 @@ describe("host external node authority", () => {
     },
   );
 
+  it.each(["raw", "plugin"])(
+    "withholds %s results revoked during the final pairing read",
+    async (path) => {
+      let live = true;
+      let resultAuthorized = false;
+      const invoke = vi.fn<NodeRegistry["invoke"]>(async () => ({
+        ok: true,
+        payload: { screenshot: "private-screen" },
+      }));
+      if (path === "plugin") {
+        mocks.applyPluginNodeInvokePolicy.mockResolvedValueOnce({
+          ok: true,
+          payload: { screenshot: "private-screen" },
+        } as never);
+      }
+      mocks.isNodePairingGenerationCurrent.mockImplementation(async () => {
+        if (resultAuthorized) {
+          live = false;
+        }
+        return true;
+      });
+      try {
+        const { invocation, respond } = startNodeInvoke({
+          invoke,
+          externalNodeInvokeAuthority: () => ({
+            authorize: async (phase) => {
+              if (phase === "result") {
+                resultAuthorized = true;
+              }
+              return true;
+            },
+            isCurrent: () => live,
+          }),
+          requestParams: {
+            expectedPairing: {
+              deviceId: "paired-node",
+              generation: "generation:paired-node:1",
+              connectionId: "paired-node-connection",
+            },
+          },
+        });
+        await invocation;
+        expect(resultAuthorized).toBe(true);
+        expect(respond).toHaveBeenCalledWith(
+          false,
+          undefined,
+          expect.objectContaining({
+            details: expect.objectContaining({ code: "EXTERNAL_AUTHORITY_CLOSED" }),
+          }),
+        );
+        expect(JSON.stringify(respond.mock.calls)).not.toContain("private-screen");
+      } finally {
+        mocks.isNodePairingGenerationCurrent.mockResolvedValue(true);
+      }
+    },
+  );
+
+  it.each(["provider", "snapshot"])(
+    "redacts %s construction failures before any dispatch",
+    async (failure) => {
+      const invoke = vi.fn();
+      const { invocation, respond } = startNodeInvoke({
+        invoke,
+        externalNodeInvokeAuthority: () => {
+          throw new Error("private-provider-secret");
+        },
+        requestParams: {
+          ...(failure === "snapshot" ? { params: () => "private-snapshot-secret" } : {}),
+          expectedPairing: {
+            deviceId: "paired-node",
+            generation: "generation:paired-node:1",
+            connectionId: "paired-node-connection",
+          },
+        },
+      });
+      await invocation;
+      expect(invoke).not.toHaveBeenCalled();
+      expect(mocks.applyPluginNodeInvokePolicy).not.toHaveBeenCalled();
+      expect(respond).toHaveBeenCalledWith(
+        false,
+        undefined,
+        expect.objectContaining({
+          message: "external node authority is unavailable or closed",
+          details: { code: "EXTERNAL_AUTHORITY_CLOSED", nodeCommandDispatched: false },
+        }),
+      );
+      expect(JSON.stringify(respond.mock.calls)).not.toContain("private-");
+    },
+  );
+
   it("rejects streaming before policy or transport", async () => {
     const invoke = vi.fn();
     const { invocation, respond } = startNodeInvoke({
