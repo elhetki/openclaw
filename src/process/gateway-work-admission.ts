@@ -37,6 +37,7 @@ type GatewayRootWorkAdmission = {
 };
 
 type GatewayWorkAdmissionState = {
+  maintenanceOwner?: object;
   restartDrainReason: GatewayDrainReason | undefined;
   restartDrainController: AbortController;
   shutdownCleanupController: AbortController;
@@ -274,7 +275,37 @@ function resolveSuspendOpenWaiters(): void {
 
 /** True while restart signal/drain or host suspension rejects new process work. */
 export function isGatewayWorkAdmissionClosed(): boolean {
-  return isGatewayRestartDraining() || GATEWAY_WORK_ADMISSION_STATE.suspendPhase !== "accepting";
+  return (
+    GATEWAY_WORK_ADMISSION_STATE.maintenanceOwner !== undefined ||
+    isGatewayRestartDraining() ||
+    GATEWAY_WORK_ADMISSION_STATE.suspendPhase !== "accepting"
+  );
+}
+
+/** Internal host capability. The caller must restore persisted maintenance before serving requests.
+ * Ordinary suspend/resume, expiry and runtime reset never release this hold. */
+export function holdGatewayMaintenanceAdmission(): {
+  release: () => void;
+  assertCurrent: () => void;
+} {
+  if (GATEWAY_WORK_ADMISSION_STATE.maintenanceOwner) {
+    throw new GatewayDrainingError("Gateway maintenance already has an owner");
+  }
+  const owner = {};
+  GATEWAY_WORK_ADMISSION_STATE.maintenanceOwner = owner;
+  const assertCurrent = () => {
+    if (GATEWAY_WORK_ADMISSION_STATE.maintenanceOwner !== owner) {
+      throw new GatewayDrainingError("Gateway maintenance ownership changed");
+    }
+  };
+  return {
+    assertCurrent,
+    release: () => {
+      assertCurrent();
+      GATEWAY_WORK_ADMISSION_STATE.maintenanceOwner = undefined;
+      resolveSuspendOpenWaiters();
+    },
+  };
 }
 
 /** Existing admitted roots may finish spawning subordinate command/session work.
@@ -289,7 +320,10 @@ export function isGatewaySubordinateWorkAdmissionClosed(): boolean {
     // re-enter admission instead of spawning untracked subordinate work.
     return current.released;
   }
-  return GATEWAY_WORK_ADMISSION_STATE.suspendPhase !== "accepting";
+  return (
+    GATEWAY_WORK_ADMISSION_STATE.maintenanceOwner !== undefined ||
+    GATEWAY_WORK_ADMISSION_STATE.suspendPhase !== "accepting"
+  );
 }
 
 export function getGatewaySuspendAdmissionPhase(): GatewaySuspendAdmissionPhase {
@@ -429,7 +463,11 @@ export function tryBeginGatewayRootWorkAdmission(
  * The caller still owns frame/auth validation; this lease grants no method authority.
  */
 export function tryBeginGatewayRestartStartupRootWorkAdmission(): GatewayRootWorkAdmissionLease | null {
-  if (!isGatewayRestartDraining() || GATEWAY_WORK_ADMISSION_STATE.suspendPhase !== "accepting") {
+  if (
+    GATEWAY_WORK_ADMISSION_STATE.maintenanceOwner !== undefined ||
+    !isGatewayRestartDraining() ||
+    GATEWAY_WORK_ADMISSION_STATE.suspendPhase !== "accepting"
+  ) {
     return null;
   }
   return createGatewayRootWorkAdmission("restart-startup");
@@ -441,6 +479,7 @@ export function tryBeginGatewayRestartStartupRootWorkAdmission(): GatewayRootWor
  */
 export function tryBeginGatewayPreparedRestartRootWorkAdmission(): GatewayRootWorkAdmissionLease | null {
   if (
+    GATEWAY_WORK_ADMISSION_STATE.maintenanceOwner !== undefined ||
     isGatewayRestartDraining() ||
     GATEWAY_WORK_ADMISSION_STATE.suspendPhase !== "prepared" ||
     GATEWAY_WORK_ADMISSION_STATE.activeRootWork.size > 0

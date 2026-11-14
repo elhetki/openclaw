@@ -5,6 +5,10 @@ import type {
 import { createWorkerOperationRegistry } from "./worker-operation-registry.js";
 
 const loaders = {
+  gatewayMaintenance: () =>
+    import("../infra/gateway-maintenance-state.worker.js").then(
+      (m) => m.gatewayMaintenanceOperations,
+    ),
   clawAdoption: () => import("./claw-adoption.worker.js").then((m) => m.clawAdoptionOperations),
   machineState: () =>
     import("./config-machine-state.worker.js").then((m) => m.machineStateOperations),
