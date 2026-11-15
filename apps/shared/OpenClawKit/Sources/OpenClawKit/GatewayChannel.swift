@@ -933,6 +933,11 @@ extension GatewayChannelActor {
             self.tickIntervalMs = tick
         }
         let auth = ok.auth
+        if options.requireExactDeviceAuthRole {
+            guard auth["role"]?.stringValue == role,
+                  auth["deviceTokens"]?.arrayValue?.allSatisfy({ $0.dictionaryValue?["role"]?.stringValue == role }) != false
+            else { throw Self.failure(1, "connect failed (unexpected device credential role)") }
+        }
         var receivedRoles = Set<String>()
         var persistedRoles = Set<String>()
         if let deviceToken = auth["deviceToken"]?.stringValue {
@@ -977,6 +982,11 @@ extension GatewayChannelActor {
                     persistedRoles.insert(authRole)
                 }
             }
+        }
+        if options.requireExactDeviceAuthRole, selectedAuth.authSource == .bootstrapToken,
+           !persistedRoles.contains(role)
+        {
+            throw Self.failure(1, "connect failed (node credential was not saved)")
         }
         self.acceptedHTTPBearer = (connectionGeneration, selectedAuth.httpResourceBearer(hello: ok, role: role))
         self.lastTick = Date()

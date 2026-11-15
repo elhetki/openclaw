@@ -31,6 +31,8 @@ public struct GatewayConnectOptions: Sendable, Equatable {
     /// Stable Gateway owner for device tokens. Nil preserves legacy unscoped storage only when
     /// `allowStoredDeviceAuth` is true; false plus nil disables both lookup and persistence.
     public var deviceAuthGatewayID: String?
+    /// Refuse hello credentials for any role other than the requested role.
+    public var requireExactDeviceAuthRole: Bool
 
     public init(
         role: String,
@@ -47,7 +49,8 @@ public struct GatewayConnectOptions: Sendable, Equatable {
         deviceIdentityProfile: GatewayDeviceIdentityProfile = .primary,
         includeDeviceIdentity: Bool = true,
         allowStoredDeviceAuth: Bool = true,
-        deviceAuthGatewayID: String? = nil)
+        deviceAuthGatewayID: String? = nil,
+        requireExactDeviceAuthRole: Bool = false)
     {
         self.role = role
         self.scopes = scopes
@@ -64,6 +67,7 @@ public struct GatewayConnectOptions: Sendable, Equatable {
         self.includeDeviceIdentity = includeDeviceIdentity
         self.allowStoredDeviceAuth = allowStoredDeviceAuth
         self.deviceAuthGatewayID = deviceAuthGatewayID
+        self.requireExactDeviceAuthRole = requireExactDeviceAuthRole
     }
 }
 

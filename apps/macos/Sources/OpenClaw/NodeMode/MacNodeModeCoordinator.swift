@@ -28,6 +28,7 @@ private struct ConnectionAttempt {
     let workerUnavailable: (reason: String, diagnostic: String?)?
     let endpoint: GatewayConnection.EndpointSnapshot
     let options: GatewayConnectOptions
+    let credentials: GatewayNodeSessionCredentials
     let sessionBox: WebSocketSessionBox?
     let fallbackMainSessionKey: String
 }
@@ -42,6 +43,9 @@ private enum RouteInvalidationMode {
 @MainActor
 final class MacNodeModeCoordinator: NSObject {
     static let shared = MacNodeModeCoordinator()
+    private lazy var nodeBootstrap = Result {
+        try MacNodeBootstrapInput.load(arguments: CommandLine.arguments, profile: AppProfile.current.name)
+    }
 
     private(set) var connectedNodeId: String?
 
@@ -556,6 +560,14 @@ final class MacNodeModeCoordinator: NSObject {
         // Node credentials belong to the selected endpoint, matching the operator route.
         // A missing owner must not unlock legacy role-global token storage.
         let deviceAuth = Self.nodeDeviceAuthBinding(for: endpoint)
+        let isNodeBootstrap = CommandLine.arguments.contains(MacNodeBootstrapInput.argument)
+        let credentials: GatewayNodeSessionCredentials
+        if isNodeBootstrap {
+            guard deviceAuth.gatewayID != nil else { throw MacNodeBootstrapInput.Refusal.invalidInput }
+            credentials = try self.nodeBootstrap.get()?.credentials(for: config.url) ?? GatewayNodeSessionCredentials()
+        } else {
+            credentials = GatewayNodeSessionCredentials(token: config.token, password: config.password)
+        }
         let options = GatewayConnectOptions(
             role: "node",
             scopes: [],
@@ -572,12 +584,13 @@ final class MacNodeModeCoordinator: NSObject {
             clientDisplayName: InstanceIdentity.displayName,
             deviceIdentityProfile: Self.nodeIdentityProfile,
             allowStoredDeviceAuth: deviceAuth.allowStoredDeviceAuth,
-            deviceAuthGatewayID: deviceAuth.gatewayID)
+            deviceAuthGatewayID: deviceAuth.gatewayID,
+            requireExactDeviceAuthRole: isNodeBootstrap)
         let sessionBox = self.buildSessionBox(url: config.url, tls: endpoint.tls)
 
         // Resolve compatibility fallback before node admission. Operator recovery
         // here cannot block the node lifecycle callback or its successor cleanup.
-        let fallbackMainSessionKey = await GatewayConnection.shared.refreshMainSessionKey()
+        let fallbackMainSessionKey = isNodeBootstrap ? "main" : await GatewayConnection.shared.refreshMainSessionKey()
         let currentEndpoint = try await self.endpointProvider()
         guard workerConfigurationGeneration == self.nodeHostWorkerConfigurationGeneration,
               Self.endpointAttemptCanConnect(
@@ -600,6 +613,7 @@ final class MacNodeModeCoordinator: NSObject {
             workerUnavailable: workerUnavailable,
             endpoint: endpoint,
             options: options,
+            credentials: credentials,
             sessionBox: sessionBox,
             fallbackMainSessionKey: fallbackMainSessionKey)
     }
@@ -607,9 +621,7 @@ final class MacNodeModeCoordinator: NSObject {
     private func connect(_ attempt: ConnectionAttempt) async throws {
         try await self.session.connect(
             url: attempt.endpoint.config.url,
-            credentials: GatewayNodeSessionCredentials(
-                token: attempt.endpoint.config.token,
-                password: attempt.endpoint.config.password),
+            credentials: attempt.credentials,
             connectOptions: attempt.options,
             sessionBox: attempt.sessionBox,
             onConnected: { [weak self] in
@@ -620,6 +632,9 @@ final class MacNodeModeCoordinator: NSObject {
                 guard let installedRoute = await self.session.currentRoute() else { return }
                 let nodeId = await self.session.connectedDeviceId()
                 guard await self.routeAuthorityAllowsInvoke(attempt.routeAuthorityGeneration) else { return }
+                if attempt.credentials.bootstrapToken != nil {
+                    await self.retireNodeBootstrap()
+                }
                 await self.recordConnectedNodeId(nodeId, authorityGeneration: attempt.routeAuthorityGeneration)
                 let workerRouteInstalled = await self.nodeHostWorker?.setRoute(
                     installedRoute,
@@ -910,11 +925,16 @@ extension MacNodeModeCoordinator {
                 clientMode: "node",
                 clientDisplayName: "Renewal Test",
                 includeDeviceIdentity: false),
+            credentials: GatewayNodeSessionCredentials(token: endpoint.config.token, password: endpoint.config.password),
             sessionBox: sessionBox,
             fallbackMainSessionKey: "main"))
     }
 
     #endif
+
+    private func retireNodeBootstrap() {
+        self.nodeBootstrap = .success(nil)
+    }
 
     private func connectWithTLSRepair(_ attempt: ConnectionAttempt) async throws -> Bool {
         do {

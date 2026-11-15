@@ -3338,6 +3338,30 @@ struct GatewayNodeSessionTests {
     }
 
     @Test(.stateDirectoryIsolated)
+    func `node-only bootstrap rejects an operator credential before either role is persisted`() async throws {
+        let identity = DeviceIdentityStore.loadOrCreate()
+        let owner = "node-only-bootstrap-fixture"
+        var options = nodeConnectOptions(includeDeviceIdentity: true)
+        options.deviceAuthGatewayID = owner
+        options.requireExactDeviceAuthRole = true
+        let session = FakeGatewayWebSocketSession(helloAuth: [
+            "deviceToken": "issued-node-token",
+            "role": "node",
+            "scopes": [],
+            "deviceTokens": [["deviceToken": "unexpected-token", "role": "operator", "scopes": []]],
+        ])
+        let gateway = GatewayNodeSession()
+        await #expect(throws: (any Error).self) {
+            try await gateway.connectForTest(
+                testURL("ws://127.0.0.1:19791"), credentials: .init(bootstrapToken: "fixture-bootstrap"),
+                options: options, session: session)
+        }
+        #expect(DeviceAuthStore.loadToken(deviceId: identity.deviceId, role: "node", gatewayID: owner) == nil)
+        #expect(DeviceAuthStore.loadToken(deviceId: identity.deviceId, role: "operator", gatewayID: owner) == nil)
+        await gateway.disconnect()
+    }
+
+    @Test(.stateDirectoryIsolated)
     func `ownerless handoff does not persist or reuse an issued device token`() async throws {
         let identity = DeviceIdentityStore.loadOrCreate()
         _ = DeviceAuthStore.storeToken(
